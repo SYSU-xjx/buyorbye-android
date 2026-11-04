@@ -8,24 +8,24 @@
         android:id="@+id/homeFragment"
         android:name="com.hku.money.ui.SectionFragment"
         android:label="@string/tab_home">
-        <argument android:name="title" app:argType="string" android:defaultValue="@string/tab_home" />
+        <argument android:name="title" app:argType="string" android:defaultValue="Home" />
     </fragment>
     <fragment
         android:id="@+id/plazaFragment"
         android:name="com.hku.money.ui.SectionFragment"
         android:label="@string/tab_plaza">
-        <argument android:name="title" app:argType="string" android:defaultValue="@string/tab_plaza" />
+        <argument android:name="title" app:argType="string" android:defaultValue="Plaza" />
     </fragment>
     <fragment
         android:id="@+id/groupsFragment"
         android:name="com.hku.money.ui.SectionFragment"
         android:label="@string/tab_groups">
-        <argument android:name="title" app:argType="string" android:defaultValue="@string/tab_groups" />
+        <argument android:name="title" app:argType="string" android:defaultValue="Groups" />
     </fragment>
     <fragment
         android:id="@+id/profileFragment"
         android:name="com.hku.money.ui.SectionFragment"
         android:label="@string/tab_profile">
-        <argument android:name="title" app:argType="string" android:defaultValue="@string/tab_profile" />
+        <argument android:name="title" app:argType="string" android:defaultValue="Profile" />
     </fragment>
 </navigation>

@@ -4,8 +4,10 @@ Java Android client for collaborative spending approvals and purchase decisions.
 
 ## Requirements
 
-- Android Studio with Android SDK Platform 37
-- JDK 17 (Android Studio's bundled JDK is suitable)
+- Android Studio 2026.1+ with Android SDK Platform 37 (AGP 9.3.0)
+- JDK 17 (Temurin 17 recommended). Android Studio 2026.1 bundles JBR 25, so JDK 17 must be
+  installed separately and selected under Settings → Build Tools → Gradle → Gradle JDK.
+  The Gradle daemon is pinned to 17 by `gradle/gradle-daemon-jvm.properties`
 - An emulator or device running Android 7.0 (API 24) or later
 
 ## Run
@@ -17,6 +19,20 @@ Open this directory in Android Studio, sync Gradle, then run the `app` configura
 ```
 
 The debug API URL defaults to `http://10.0.2.2:8080/api/` for the Android emulator. For a physical device, set `API_BASE_URL` in `app/build.gradle.kts` to the development machine's LAN address. Do not commit secrets or device-specific URLs.
+
+## Database
+
+The server-side MySQL schema lives in [`database/`](database/README.md):
+
+- `database/schema/buy_or_bye_schema.sql` — creates the `buy_or_bye` database and its 30 tables
+- `database/docs/数据库表结构_最终版.md` — table-by-table design document
+
+```sh
+mysql -u root -p < database/schema/buy_or_bye_schema.sql
+```
+
+The Android client never connects to MySQL directly; it talks to the Spring Boot backend at
+`API_BASE_URL`. MySQL 8.4+ is required (CHECK constraints are enforced from 8.0.16).
 
 ## Structure and versions
 
