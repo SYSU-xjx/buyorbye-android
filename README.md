@@ -1,6 +1,6 @@
 # buy or bye Android
 
-Java Android client for collaborative spending approvals and purchase decisions.
+Java Android client for purchase proposals: users share items they are unsure about buying and explain their reasons, then others vote `BUY` or `NOT_BUY` with a reason.
 
 ## Requirements
 
@@ -28,10 +28,12 @@ The debug API URL defaults to `http://10.0.2.2:8080/api/` for the Android emulat
 
 ## Team workflow
 
-- Branch from `main` with a focused name such as `feature/approval-list`.
+- Branch from `main` with a focused name such as `feature/proposal-list`.
 - Open a Pull Request; do not push directly to `main`.
 - Require one teammate approval and passing Android CI before merging.
 - Follow `.editorconfig` and keep API changes coordinated with the backend repository.
 - Never commit `local.properties`, credentials, signing keys, IDE state, or build output.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The shared system design is maintained in the [backend repository](https://github.com/SYSU-xjx/buyorbye-backend/blob/main/DESIGN.md).
