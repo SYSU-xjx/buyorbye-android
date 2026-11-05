@@ -38,15 +38,11 @@ Open this directory in Android Studio, sync Gradle, then run the `app` configura
 
 The debug API URL defaults to `http://10.0.2.2:8080/api/` for the Android emulator. For a physical device, set `API_BASE_URL` in `app/build.gradle.kts` to the development machine's LAN address. Do not commit secrets or device-specific URLs.
 
-## Design references
-
-These screenshots are the original layout references. The Android preview uses English and a mint, teal, and lime palette.
+## App screenshots
 
 | Home | Groups | Plaza | Profile |
 | --- | --- | --- | --- |
-| <img src="docs/images/home.png" alt="Home reference" width="155"> | <img src="docs/images/groups.png" alt="Groups reference" width="155"> | <img src="docs/images/plaza.png" alt="Plaza reference" width="155"> | <img src="docs/images/profile.png" alt="Profile reference" width="155"> |
-
-[Publish form](docs/images/publish.png) · [Manage channels](docs/images/channels.png) · [Proposal details](docs/images/detail.png) · [Timed voting](docs/images/plaza-time.png)
+| <img src="docs/screenshots/home.png" alt="Home screenshot" width="155"> | <img src="docs/screenshots/groups.png" alt="Groups screenshot" width="155"> | <img src="docs/screenshots/plaza.png" alt="Plaza screenshot" width="155"> | <img src="docs/screenshots/profile.png" alt="Profile screenshot" width="155"> |
 
 ## Structure and versions
 
