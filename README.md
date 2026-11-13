@@ -16,7 +16,18 @@ Java Android client for purchase proposals: users share items they are unsure ab
 adb install -r docs/downloads/buyorbye-preview-debug.apk
 ```
 
-This build uses local demo data for the preview flows. It is signed with a debug key for testing.
+This debug build supports backend login and proposal publishing, plus an explicit local Preview mode.
+
+### Connect a backend
+
+On the login screen, open **Server settings**, enter the API base URL or Swagger URL, and use **Test connection** before saving. For a backend on the emulator host computer, use `http://10.0.2.2:8080/api/`. For a teammate's computer or a physical phone, use a reachable LAN or deployed server address.
+
+Register or log in to publish through the backend. The form loads available groups, channels, and tags from the server, saves a draft, then publishes it. After confirmation, **View post** opens Submitted records. Plaza and history use server pagination, refresh, and retry.
+
+**Explore Preview** saves posts on the device and labels them as local. Other areas, including rankings and parts of Profile, still use demo data. Photo upload is pending, and the current server publishing form supports MULTI + TIME settlement.
+
+<img src="docs/screenshots/login.png" alt="Login screen" width="240">
+
 
 ## Local Android Studio setup
 
@@ -36,7 +47,7 @@ Open this directory in Android Studio, sync Gradle, then run the `app` configura
 ./gradlew test lint assembleDebug
 ```
 
-The debug API URL defaults to `http://10.0.2.2:8080/api/` for the Android emulator. For a physical device, set `API_BASE_URL` in `app/build.gradle.kts` to the development machine's LAN address. Do not commit secrets or device-specific URLs.
+The debug API URL defaults to `http://10.0.2.2:8080/api/` for the Android emulator. Use **Server settings** to select a reachable server without rebuilding. Session preferences are excluded from Android backup.
 
 ## App screenshots
 
