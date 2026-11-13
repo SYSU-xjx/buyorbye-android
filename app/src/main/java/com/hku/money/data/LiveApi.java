@@ -7,6 +7,8 @@ import java.util.concurrent.Executors;
 import android.os.Handler;
 import android.os.Looper;
 import okhttp3.*;
+import android.net.Uri;
+import java.io.IOException;
 
 public final class LiveApi {
     private static final java.util.concurrent.ExecutorService WORK = Executors.newSingleThreadExecutor();
@@ -117,6 +119,45 @@ public final class LiveApi {
             } catch (Exception failure) {
                 android.util.Log.e("LiveApi", "Request failed: " + method + " " + path, failure);
                 error = "Cannot reach the server. Check your connection and try again.";
+            }
+            com.google.gson.JsonElement value = data;
+            String message = error;
+            MAIN.post(() -> callback.done(value, message));
+        });
+    }
+
+    public void upload(String path, Uri uri, Callback callback) {
+        String token = preferences.getString("token", "");
+        String server = baseUrl();
+        WORK.execute(() -> {
+            com.google.gson.JsonElement data = null;
+            String error = null;
+            try {
+                String mime = context.getContentResolver().getType(uri);
+                if (mime == null || !mime.startsWith("image/")) throw new IOException("Unsupported image");
+                RequestBody file = new RequestBody() {
+                    @Override public MediaType contentType() { return MediaType.parse(mime); }
+                    @Override public void writeTo(okio.BufferedSink sink) throws IOException {
+                        try (java.io.InputStream input = context.getContentResolver().openInputStream(uri)) {
+                            if (input == null) throw new IOException("Cannot read image");
+                            byte[] buffer = new byte[8192];
+                            int read;
+                            while ((read = input.read(buffer)) != -1) sink.write(buffer, 0, read);
+                        }
+                    }
+                };
+                RequestBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
+                        .addFormDataPart("file", "image", file).build();
+                Request.Builder request = new Request.Builder().url(server + path).post(body);
+                if (!token.isEmpty()) request.header("Authorization", "Bearer " + token);
+                try (Response response = CLIENT.newCall(request.build()).execute()) {
+                    JsonObject result = new com.google.gson.Gson().fromJson(response.body().string(), JsonObject.class);
+                    if (!response.isSuccessful()) error = result.has("message") ? result.get("message").getAsString() : "Upload failed (" + response.code() + ")";
+                    else data = result.get("data");
+                }
+            } catch (Exception failure) {
+                android.util.Log.e("LiveApi", "Upload failed: " + path, failure);
+                error = "Could not upload the image.";
             }
             com.google.gson.JsonElement value = data;
             String message = error;

@@ -27,6 +27,7 @@ public class SectionFragment extends Fragment {
         "SGD", "THB", "CAD", "AUD", "NZD", "CHF", "RUB", "MYR", "IDR"
     };
     private final java.util.ArrayList<android.net.Uri> photos = new java.util.ArrayList<>();
+    private final java.util.Set<android.net.Uri> uploadedPhotos = new java.util.HashSet<>();
     private LinearLayout photoList;
     private final androidx.activity.result.ActivityResultLauncher<String> photoPicker =
             registerForActivityResult(new androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents(), selected -> {
@@ -306,6 +307,10 @@ public class SectionFragment extends Fragment {
     }
 
     private void groups() {
+        if (!new com.hku.money.data.LiveApi(requireContext()).preview()) {
+            loadServerGroups();
+            return;
+        }
         title("My groups");
         content.addView(text("Better buying decisions, together.", 15, MUTED));
         LinearLayout actions = new LinearLayout(requireContext());
@@ -320,6 +325,46 @@ public class SectionFragment extends Fragment {
             tile.setOnClickListener(v -> groupDetails(group));
         }
         card(content).addView(text("Try joining with demo code 382615. Groups are saved on this device.", 14, MUTED));
+    }
+
+    private void loadServerGroups() {
+        title("My groups");
+        content.addView(text("Better buying decisions, together.", 15, MUTED));
+        LinearLayout actions = new LinearLayout(requireContext());
+        content.addView(actions);
+        button(fieldColumn(actions), "+ Create a group", this::createGroup);
+        button(fieldColumn(actions), "Join with code", this::joinGroup);
+        LinearLayout list = column();
+        content.addView(list);
+        new com.hku.money.data.LiveApi(requireContext()).request("GET", "groups?size=100", null, (data, error) -> {
+            if (getView() == null) return;
+            if (error != null) { list.addView(text(error, 14, MUTED)); return; }
+            com.google.gson.JsonArray items = data.getAsJsonObject().getAsJsonArray("items");
+            for (com.google.gson.JsonElement item : items) {
+                com.google.gson.JsonObject group = item.getAsJsonObject();
+                LinearLayout tile = card(list);
+                heading(tile, jsonText(group, "name", "Group"));
+                tile.addView(text(jsonText(group, "memberCount", "0") + " members  ·  Code "
+                        + jsonText(group, "inviteCode", "") + "  ›", 14, MUTED));
+                tile.setOnClickListener(v -> serverGroupDetails(group));
+            }
+            if (items.isEmpty()) emptyProfileCard(list, "No groups yet", "Create or join a group to get started.");
+        });
+    }
+
+    private void serverGroupDetails(com.google.gson.JsonObject group) {
+        BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
+        String id = jsonText(group, "id", "");
+        LinearLayout panel = groupSheet(sheet, jsonText(group, "name", "Group"));
+        panel.addView(text(jsonText(group, "memberCount", "0") + " members", 15, MUTED));
+        panel.addView(text("Invite code  ·  " + jsonText(group, "inviteCode", ""), 15, INK));
+        button(panel, "New buy check", () -> { sheet.dismiss(); navigate(R.id.publishFragment); });
+        button(panel, "Leave group", () -> new com.hku.money.data.LiveApi(requireContext()).request("DELETE",
+                "groups/" + id + "/members/me", null, (data, error) -> {
+                    if (error != null) return;
+                    sheet.dismiss(); content.removeAllViews(); groups();
+                }));
+        showModal(sheet);
     }
 
     private LinearLayout groupSheet(BottomSheetDialog sheet, String title) {
@@ -387,6 +432,15 @@ public class SectionFragment extends Fragment {
                 name.requestFocus();
                 return;
             }
+            if (!new com.hku.money.data.LiveApi(requireContext()).preview()) {
+                com.google.gson.JsonObject body = new com.google.gson.JsonObject();
+                body.addProperty("name", value);
+                new com.hku.money.data.LiveApi(requireContext()).request("POST", "groups", body, (data, error) -> {
+                    if (error != null) { name.setError(error); return; }
+                    sheet.dismiss(); content.removeAllViews(); groups();
+                });
+                return;
+            }
             RadioGroup selectedRow = icons.getCheckedRadioButtonId() == View.NO_ID ? moreIcons : icons;
             RadioButton selected = selectedRow.findViewById(selectedRow.getCheckedRadioButtonId());
             String icon = customIcon.getText().toString().trim();
@@ -411,14 +465,25 @@ public class SectionFragment extends Fragment {
     private void joinGroup() {
         BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
         LinearLayout panel = groupSheet(sheet, "Join a group");
-        panel.addView(text("Demo code: 382615", 14, MUTED));
+        if (new com.hku.money.data.LiveApi(requireContext()).preview()) panel.addView(text("Demo code: 382615", 14, MUTED));
         EditText code = input(panel, "6-digit group code *", "e.g. 382615", false);
         code.setInputType(InputType.TYPE_CLASS_NUMBER);
-        code.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(6)});
+        code.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(
+                new com.hku.money.data.LiveApi(requireContext()).preview() ? 6 : 8)});
         groupActions(panel, sheet, "Join group", () -> {
             String value = code.getText().toString();
-            if (!value.matches("[0-9]{6}")) {
-                code.setError("Enter a 6-digit code.");
+            int codeLength = new com.hku.money.data.LiveApi(requireContext()).preview() ? 6 : 8;
+            if (!value.matches("[0-9]{" + codeLength + "}")) {
+                code.setError("Enter a " + codeLength + "-digit code.");
+                return;
+            }
+            if (!new com.hku.money.data.LiveApi(requireContext()).preview()) {
+                com.google.gson.JsonObject body = new com.google.gson.JsonObject();
+                body.addProperty("inviteCode", value);
+                new com.hku.money.data.LiveApi(requireContext()).request("POST", "groups/join", body, (data, error) -> {
+                    if (error != null) { code.setError(error); return; }
+                    sheet.dismiss(); content.removeAllViews(); groups();
+                });
                 return;
             }
             for (ShoppingGroup group : savedGroups()) {
@@ -634,7 +699,56 @@ public class SectionFragment extends Fragment {
                     panel.addView(text(jsonText(post, "status", "") + " · "
                             + jsonText(post, "voterCount", "0") + " votes", 14, MUTED));
                     panel.addView(text("Deadline · " + jsonText(post, "deadlineAt", "Not published"), 13, MUTED));
+                    String proposalId = jsonText(post, "id", id);
+                    com.google.gson.JsonObject myVote = detail.getAsJsonObject("myVote");
+                    if (myVote == null || myVote.isJsonNull()) {
+                        button(panel, "Vote", () -> serverVote(proposalId, detail, sheet));
+                    }
+                    boolean watching = post.has("watching") && post.get("watching").getAsBoolean();
+                    button(panel, watching ? "Stop watching" : "Watch buy check", () ->
+                            new com.hku.money.data.LiveApi(requireContext()).request(watching ? "DELETE" : "PUT",
+                                    "purchase-proposals/" + proposalId + "/watches", null, (result, requestError) -> {
+                                        if (getView() == null || !sheet.isShowing()) return;
+                                        if (requestError != null) state.setText(requestError);
+                                        else { sheet.dismiss(); serverProposalDetails(proposalId); }
+                                    }));
                 });
+    }
+
+    private void serverVote(String id, com.google.gson.JsonObject detail, BottomSheetDialog details) {
+        BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
+        LinearLayout panel = groupSheet(sheet, "Cast your vote");
+        com.google.gson.JsonObject proposal = detail.getAsJsonObject("proposal");
+        com.google.gson.JsonArray options = detail.getAsJsonArray("options");
+        boolean optionVote = "OPTION".equals(jsonText(proposal, "participationType", ""));
+        EditText reason = input(panel, "Reason *", "Tell us why", true);
+        String[] labels = optionVote
+                ? java.util.stream.StreamSupport.stream(options.spliterator(), false)
+                    .map(option -> jsonText(option.getAsJsonObject(), "text", "Option"))
+                    .toArray(String[]::new)
+                : new String[]{"Buy it", "Wait"};
+        RadioGroup choice = choices(panel, "Your vote", -1, labels);
+        button(panel, "Submit vote", () -> {
+            String value = reason.getText().toString().trim();
+            if (value.isEmpty()) { reason.setError("Add a reason to submit your vote."); return; }
+            int selected = -1;
+            for (int i = 0; i < choice.getChildCount(); i++) {
+                if (choice.getCheckedRadioButtonId() == choice.getChildAt(i).getId()) selected = i;
+            }
+            if (selected < 0) { reason.setError("Choose your vote."); return; }
+            com.google.gson.JsonObject body = new com.google.gson.JsonObject();
+            body.addProperty("clientRequestId", java.util.UUID.randomUUID().toString());
+            if (optionVote) body.addProperty("optionId", options.get(selected).getAsJsonObject().get("id").getAsLong());
+            else body.addProperty("choice", selected == 0 ? "BUY" : "NOT_BUY");
+            body.addProperty("reason", value);
+            new com.hku.money.data.LiveApi(requireContext()).request("POST", "purchase-proposals/" + id + "/votes", body,
+                    (result, error) -> {
+                        if (getView() == null || !sheet.isShowing()) return;
+                        if (error != null) { reason.setError(error); return; }
+                        sheet.dismiss(); details.dismiss(); serverProposalDetails(id);
+                    });
+        });
+        showModal(sheet);
     }
 
     private void loadServerPage(LinearLayout list, String endpoint, int page, Object generation) {
@@ -1029,11 +1143,41 @@ public class SectionFragment extends Fragment {
     private void ranks() {
         BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
         LinearLayout panel = groupSheet(sheet, "Cart Hall of Fame");
-        panel.addView(text("Demo leaderboard  ·  CNY", 13, MUTED));
+        boolean preview = new com.hku.money.data.LiveApi(requireContext()).preview();
+        panel.addView(text(preview ? "Demo leaderboard  ·  CNY" : "Live leaderboard", 13, MUTED));
         RadioGroup period = choices(panel, "Period", 0, "Today", "Week", "Month");
         RadioGroup category = choices(panel, "Leaderboard", 0, "Wallet Wins", "Cart Confessions");
         LinearLayout list = column();
         panel.addView(list);
+        if (!preview) {
+            Runnable load = () -> {
+                list.removeAllViews();
+                String type = picked(category, 0) ? "HIGHEST_APPROVED_AMOUNT" : "MOST_REJECTED";
+                String window = picked(period, 0) ? "DAY" : picked(period, 1) ? "WEEK" : "MONTH";
+                new com.hku.money.data.LiveApi(requireContext()).request("GET",
+                        "rankings?type=" + type + "&period=" + window + "&page=1&size=20", null,
+                        (data, error) -> {
+                            if (getView() == null || !sheet.isShowing()) return;
+                            if (error != null) { list.addView(text(error, 14, MUTED)); return; }
+                            com.google.gson.JsonArray items = data.getAsJsonObject().getAsJsonArray("items");
+                            for (com.google.gson.JsonElement item : items) {
+                                com.google.gson.JsonObject entry = item.getAsJsonObject();
+                                LinearLayout row = card(list);
+                                heading(row, jsonText(entry, "rankNo", "?") + "   "
+                                        + jsonText(entry, "displayName", "Shopper") + "   ·   "
+                                        + jsonText(entry, "metricValue", "0")
+                                        + ("HIGHEST_APPROVED_AMOUNT".equals(type) ? " HKD" : " rejected"));
+                            }
+                            if (items.isEmpty()) emptyProfileCard(list, "No rankings yet", "Results will appear here.");
+                        });
+            };
+            period.setOnCheckedChangeListener((group, id) -> load.run());
+            category.setOnCheckedChangeListener((group, id) -> load.run());
+            panel.addView(plazaAction("Refresh", BG, TEAL, load));
+            load.run();
+            showModal(sheet);
+            return;
+        }
         Runnable render = () -> {
             list.removeAllViews();
             boolean saved = picked(category, 0);
@@ -1202,7 +1346,9 @@ public class SectionFragment extends Fragment {
     private void profile() {
         profileTitle("Profile", null);
         content.addView(plazaAction("Log out", BG, TEAL, () -> {
-            new com.hku.money.data.LiveApi(requireContext()).clear();
+            com.hku.money.data.LiveApi api = new com.hku.money.data.LiveApi(requireContext());
+            if (!api.preview()) api.request("POST", "auth/logout", null, (data, error) -> {});
+            api.clear();
             startActivity(new android.content.Intent(requireContext(), com.hku.money.LoginActivity.class));
             requireActivity().finish();
         }));
@@ -1217,7 +1363,10 @@ public class SectionFragment extends Fragment {
         avatarLayout.gravity = android.view.Gravity.CENTER_HORIZONTAL;
         avatarLayout.setMargins(0, dp(20), 0, dp(8));
         content.addView(avatar, avatarLayout);
-        centeredProfileText(content, "Thoughtful Shopper", 23, INK, true);
+        TextView displayName = text("Thoughtful Shopper", 23, INK);
+        displayName.setGravity(android.view.Gravity.CENTER);
+        displayName.setTypeface(null, Typeface.BOLD);
+        content.addView(displayName);
         int points = playPreferences().getInt("points", 0);
         content.addView(plazaAction(judgeRank(points) + "  ·  " + points + " pts", 0xffe9f3cf, TEAL, this::judgeBadge));
 
@@ -1227,8 +1376,20 @@ public class SectionFragment extends Fragment {
         }
         LinearLayout metrics = new LinearLayout(requireContext());
         content.addView(metrics);
-        profileMetric(fieldColumn(metrics), "MY BUY CHECKS", "0", "Submitted", Color.WHITE);
-        profileMetric(fieldColumn(metrics), "PLAZA ACTIVITY", String.valueOf(votes), "Votes cast", 0xffe9f3cf);
+        TextView submitted = profileMetric(fieldColumn(metrics), "MY BUY CHECKS", "0", "Submitted", Color.WHITE);
+        TextView voted = profileMetric(fieldColumn(metrics), "PLAZA ACTIVITY", String.valueOf(votes), "Votes cast", 0xffe9f3cf);
+        if (!new com.hku.money.data.LiveApi(requireContext()).preview()) {
+            com.hku.money.data.LiveApi api = new com.hku.money.data.LiveApi(requireContext());
+            api.request("GET", "users/me", null, (data, error) -> {
+                if (error == null && getView() != null) displayName.setText(jsonText(data.getAsJsonObject(), "displayName", "Shopper"));
+            });
+            api.request("GET", "users/me/statistics", null, (data, error) -> {
+                if (error == null && getView() != null) {
+                    submitted.setText(jsonText(data.getAsJsonObject(), "submittedCount", "0"));
+                    voted.setText(jsonText(data.getAsJsonObject(), "votedCount", "0"));
+                }
+            });
+        }
 
         LinearLayout records = card(content);
         heading(records, "My records");
@@ -1262,7 +1423,7 @@ public class SectionFragment extends Fragment {
         if (description != null) content.addView(text(description, 14, MUTED));
     }
 
-    private void profileMetric(LinearLayout parent, String label, String value, String caption, int fill) {
+    private TextView profileMetric(LinearLayout parent, String label, String value, String caption, int fill) {
         LinearLayout metric = card(parent);
         metric.setPadding(dp(12), dp(12), dp(12), dp(12));
         metric.setBackground(surface(fill));
@@ -1271,6 +1432,7 @@ public class SectionFragment extends Fragment {
         number.setTypeface(null, Typeface.BOLD);
         metric.addView(number);
         metric.addView(text(caption, 13, MUTED));
+        return number;
     }
 
     private TextView profileIcon(String glyph, int fill) {
@@ -1327,7 +1489,13 @@ public class SectionFragment extends Fragment {
             case "blocked" -> blockedPage();
             case "drafts" -> {
                 profileTitle("Drafts", null);
-                emptyProfileCard(content, "No drafts yet", "Saved drafts will appear here.");
+                if (new com.hku.money.data.LiveApi(requireContext()).preview()) {
+                    emptyProfileCard(content, "No drafts yet", "Saved drafts will appear here.");
+                } else {
+                    LinearLayout drafts = column();
+                    content.addView(drafts);
+                    loadServerPage(drafts, "users/me/records?type=SUBMITTED&status=DRAFT", 1, new Object());
+                }
             }
             default -> history(page);
         }
@@ -1760,10 +1928,6 @@ public class SectionFragment extends Fragment {
                 publishStatus.setText("Choose an available group/channel and tag. Reopen this page to retry loading.");
                 return;
             }
-            if (!photos.isEmpty()) {
-                publishStatus.setText("Photo upload is not connected yet. Remove photos to publish.");
-                return;
-            }
             if (valid) {
                 com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
                 payload.addProperty("clientRequestId", requestId);
@@ -1835,35 +1999,56 @@ public class SectionFragment extends Fragment {
                         return;
                     }
                     draftId[0] = saved.getAsJsonObject().getAsJsonObject("proposal").get("id").getAsLong();
-                    publishStatus.setText("Publishing…");
-                    com.google.gson.JsonObject publishBody = new com.google.gson.JsonObject();
-                    int[] hours = {1, 2, 24, 168};
-                    int selected = 2;
-                    for (int i = 0; i < 4; i++) if (picked(duration, i)) selected = i;
-                    publishBody.addProperty("durationHours", hours[selected]);
-                    api.request("POST", "purchase-proposals/" + draftId[0] + "/publish", publishBody, (published, publishError) -> {
+                    publishStatus.setText(photos.isEmpty() ? "Publishing…" : "Uploading photos…");
+                    uploadPhotos(api, draftId[0], 0, uploadError -> {
                         if (getView() == null) return;
-                        publishAction.setEnabled(true);
-                        if (publishError != null) {
-                            publishStatus.setText(publishError + " Your draft is saved. Retry here.");
+                        if (uploadError != null) {
+                            publishAction.setEnabled(true);
+                            publishStatus.setText(uploadError + " Your draft is saved. Retry here.");
                             return;
                         }
-                        publishAction.setEnabled(false);
-                        publishStatus.setText("Published · #" + draftId[0]);
-                        showModal(new androidx.appcompat.app.AlertDialog.Builder(requireContext())
-                                .setTitle("Published!")
-                                .setMessage("Buy check #" + draftId[0] + " is live on the server.")
-                                .setPositiveButton("View post", (dialog, which) -> {
-                                    Bundle args = new Bundle();
-                                    args.putString("profile_page", "submitted");
-                                    NavHostFragment.findNavController(this).navigate(R.id.profilePageFragment, args);
-                                }).create());
+                        publishStatus.setText("Publishing…");
+                        com.google.gson.JsonObject publishBody = new com.google.gson.JsonObject();
+                        int[] hours = {1, 2, 24, 168};
+                        int selected = 2;
+                        for (int i = 0; i < 4; i++) if (picked(duration, i)) selected = i;
+                        publishBody.addProperty("durationHours", hours[selected]);
+                        api.request("POST", "purchase-proposals/" + draftId[0] + "/publish", publishBody, (published, publishError) -> {
+                            if (getView() == null) return;
+                            publishAction.setEnabled(true);
+                            if (publishError != null) {
+                                publishStatus.setText(publishError + " Your draft is saved. Retry here.");
+                                return;
+                            }
+                            publishAction.setEnabled(false);
+                            publishStatus.setText("Published · #" + draftId[0]);
+                            showModal(new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                                    .setTitle("Published!")
+                                    .setMessage("Buy check #" + draftId[0] + " is live on the server.")
+                                    .setPositiveButton("View post", (dialog, which) -> {
+                                        Bundle args = new Bundle();
+                                        args.putString("profile_page", "submitted");
+                                        NavHostFragment.findNavController(this).navigate(R.id.profilePageFragment, args);
+                                    }).create());
+                        });
                     });
                 });
             }
             else for (EditText field : new EditText[]{firstOption, secondOption, name, amount, reason, minimum}) {
                 if (field.isShown() && field.getError() != null) { field.requestFocus(); break; }
             }
+        });
+    }
+    private void uploadPhotos(com.hku.money.data.LiveApi api, long proposalId, int index,
+                              java.util.function.Consumer<String> done) {
+        while (index < photos.size() && uploadedPhotos.contains(photos.get(index))) index++;
+        if (index == photos.size()) { done.accept(null); return; }
+        int next = index + 1;
+        android.net.Uri uri = photos.get(index);
+        api.upload("purchase-proposals/" + proposalId + "/images", uri, (data, error) -> {
+            if (error != null) { done.accept(error); return; }
+            uploadedPhotos.add(uri);
+            uploadPhotos(api, proposalId, next, done);
         });
     }
     // Retain existing preference keys when localizing channel labels.
@@ -1940,6 +2125,10 @@ public class SectionFragment extends Fragment {
     }
 
     private void channels() {
+        if (!new com.hku.money.data.LiveApi(requireContext()).preview()) {
+            liveChannels();
+            return;
+        }
         content.addView(plazaAction("‹  Back to Plaza", BG, TEAL,
                 () -> NavHostFragment.findNavController(this).navigateUp()));
         plazaLabel(content, "PLAZA  /  PREFERENCES");
@@ -1998,6 +2187,46 @@ public class SectionFragment extends Fragment {
             for (String key : order) edit.putBoolean(key, followed.contains(key));
             edit.apply();
             NavHostFragment.findNavController(this).navigateUp();
+        });
+    }
+
+    private void liveChannels() {
+        content.addView(plazaAction("‹  Back to Plaza", BG, TEAL,
+                () -> NavHostFragment.findNavController(this).navigateUp()));
+        plazaLabel(content, "PLAZA  /  PREFERENCES");
+        heading(content, "Manage channels");
+        LinearLayout list = column();
+        content.addView(list);
+        com.hku.money.data.LiveApi api = new com.hku.money.data.LiveApi(requireContext());
+        api.request("GET", "channels", null, (data, error) -> {
+            if (getView() == null) return;
+            if (error != null) { list.addView(text(error, 14, MUTED)); return; }
+            com.google.gson.JsonArray channels = data.getAsJsonArray();
+            java.util.Set<Long> followed = new java.util.HashSet<>();
+            for (com.google.gson.JsonElement item : channels) {
+                com.google.gson.JsonObject channel = item.getAsJsonObject();
+                long id = channel.get("id").getAsLong();
+                if (channel.get("subscribed").getAsBoolean()) followed.add(id);
+                CheckBox toggle = new CheckBox(requireContext());
+                toggle.setText(jsonText(channel, "name", "Channel"));
+                toggle.setChecked(followed.contains(id));
+                list.addView(toggle);
+                toggle.setTag(id);
+                toggle.setOnCheckedChangeListener((button, checked) -> {
+                    long channelId = (long) button.getTag();
+                    if (checked) followed.add(channelId); else followed.remove(channelId);
+                });
+            }
+            button(content, "Save", () -> {
+                com.google.gson.JsonArray ids = new com.google.gson.JsonArray();
+                for (Long id : followed) ids.add(id);
+                com.google.gson.JsonObject body = new com.google.gson.JsonObject();
+                body.add("channelIds", ids);
+                api.request("PUT", "channels/subscriptions", body, (saved, saveError) -> {
+                    if (saveError != null) Toast.makeText(requireContext(), saveError, Toast.LENGTH_LONG).show();
+                    else NavHostFragment.findNavController(this).navigateUp();
+                });
+            });
         });
     }
 }
