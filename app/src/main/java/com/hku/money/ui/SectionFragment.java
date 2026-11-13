@@ -38,6 +38,15 @@ public class SectionFragment extends Fragment {
             });
 
     @Override public void onDestroyView() {
+        // Dialog callbacks can arrive after navigation has detached this Fragment.
+        for (android.app.Dialog dialog : new java.util.ArrayList<>(openModals)) {
+            dialog.setOnDismissListener(null);
+            dialog.dismiss();
+        }
+        openModals.clear();
+        if (android.os.Build.VERSION.SDK_INT >= 31 && getActivity() != null) {
+            getActivity().findViewById(android.R.id.content).setRenderEffect(null);
+        }
         photoList = null;
         content = null;
         super.onDestroyView();
@@ -125,7 +134,7 @@ public class SectionFragment extends Fragment {
 
     private void updateModalBlur(View activityBackground) {
         if (android.os.Build.VERSION.SDK_INT < 31) return;
-        float radius = dp(12);
+        float radius = 12 * activityBackground.getResources().getDisplayMetrics().density;
         android.graphics.RenderEffect blur = android.graphics.RenderEffect.createBlurEffect(
                 radius, radius, android.graphics.Shader.TileMode.CLAMP);
         activityBackground.setRenderEffect(openModals.isEmpty() ? null : blur);
@@ -187,6 +196,34 @@ public class SectionFragment extends Fragment {
             cell.addView(label);
         }
     }
+    private com.google.gson.JsonArray localPublished() {
+        String json = requireContext().getSharedPreferences("preview_published", 0).getString("items", "[]");
+        return new com.google.gson.Gson().fromJson(json, com.google.gson.JsonArray.class);
+    }
+
+    private void showLocalPublished(LinearLayout parent, boolean plazaOnly) {
+        for (com.google.gson.JsonElement entry : localPublished()) {
+            com.google.gson.JsonObject proposal = entry.getAsJsonObject();
+            if (plazaOnly && !"PLAZA".equals(proposal.get("publicationScope").getAsString())) continue;
+            LinearLayout tile = card(parent);
+            plazaLabel(tile, "YOUR POST  /  LOCAL PREVIEW");
+            String label = proposal.has("itemName") ? proposal.get("itemName").getAsString()
+                    : proposal.get("pollQuestion").getAsString();
+            heading(tile, label);
+            if (proposal.has("amount")) tile.addView(text(proposal.get("currency").getAsString() + " "
+                    + proposal.get("amount").getAsString(), 22, TEAL));
+            tile.addView(text(proposal.get("purchaseReason").getAsString(), 15, INK));
+            tile.addView(text("Open · " + proposal.get("durationHours").getAsInt() + " hour voting window", 13, MUTED));
+            tile.addView(plazaAction("View post", BG, TEAL, () -> {
+                BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
+                LinearLayout panel = groupSheet(sheet, label);
+                panel.addView(text(proposal.get("purchaseReason").getAsString(), 15, INK));
+                panel.addView(text("Published on this device · 0 votes", 13, MUTED));
+                showModal(sheet);
+            }));
+        }
+    }
+
     private void home() {
         title("What’s on your wishlist?"); content.addView(text("Good buys start with a second opinion.", 15, MUTED));
         LinearLayout c = card(content);
@@ -500,7 +537,199 @@ public class SectionFragment extends Fragment {
         parent.addView(text);
     }
 
+    private String jsonText(com.google.gson.JsonObject value, String key, String fallback) {
+        return value.has(key) && !value.get(key).isJsonNull() ? value.get(key).getAsString() : fallback;
+    }
+
+    private void serverProposalCard(LinearLayout parent, com.google.gson.JsonObject post) {
+        LinearLayout tile = card(parent);
+        tile.setPadding(dp(18), dp(18), dp(18), dp(12));
+        String author = jsonText(post, "authorName", "Your buy check");
+        if (author.isBlank()) author = "Shopper";
+        String status = jsonText(post, "status", "OPEN");
+        String statusLabel = switch (status) {
+            case "OPEN" -> "Open";
+            case "DRAFT" -> "Draft";
+            case "SETTLED" -> "Settled";
+            case "WITHDRAWN" -> "Withdrawn";
+            case "INSUFFICIENT_PARTICIPATION" -> "Not enough votes";
+            default -> status;
+        };
+        LinearLayout top = new LinearLayout(requireContext());
+        top.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        tile.addView(top);
+        TextView initial = text(author.substring(0, 1).toUpperCase(java.util.Locale.ENGLISH), 14, TEAL);
+        initial.setGravity(android.view.Gravity.CENTER);
+        initial.setTypeface(null, Typeface.BOLD);
+        initial.setBackground(surface(0xffe7f1e8));
+        top.addView(initial, new LinearLayout.LayoutParams(dp(32), dp(32)));
+        TextView authorName = text(author, 13, MUTED);
+        authorName.setMaxLines(1);
+        authorName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        authorName.setPadding(dp(8), 0, dp(8), 0);
+        top.addView(authorName, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView badge = text(statusLabel, 11, TEAL);
+        badge.setPadding(dp(9), dp(4), dp(9), dp(4));
+        badge.setBackground(surface("OPEN".equals(status) ? 0xffe9f3cf : BG));
+        top.addView(badge);
+
+        String title = jsonText(post, "title",
+                jsonText(post, "itemName", jsonText(post, "pollQuestion", "Buy check")));
+        TextView titleView = text(title, 21, INK);
+        titleView.setTypeface(null, Typeface.BOLD);
+        LinearLayout.LayoutParams titleLayout = new LinearLayout.LayoutParams(-1, -2);
+        titleLayout.topMargin = dp(12);
+        tile.addView(titleView, titleLayout);
+        if (post.has("amount") && !post.get("amount").isJsonNull()) {
+            String currency = jsonText(post, "currency", "");
+            String symbol = currency.equals("CNY") ? "¥ " : currency + " ";
+            TextView price = text(symbol + jsonText(post, "amount", ""), 27, TEAL);
+            price.setTypeface(null, Typeface.BOLD);
+            tile.addView(price);
+        }
+        String reason = jsonText(post, "purchaseReason", "");
+        if (!reason.isEmpty()) {
+            TextView description = text(reason, 14, MUTED);
+            description.setMaxLines(2);
+            description.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            tile.addView(description);
+        }
+
+        View line = new View(requireContext());
+        line.setBackgroundColor(0xffe8eee7);
+        LinearLayout.LayoutParams lineLayout = new LinearLayout.LayoutParams(-1, dp(1));
+        lineLayout.topMargin = dp(12);
+        tile.addView(line, lineLayout);
+        LinearLayout footer = new LinearLayout(requireContext());
+        footer.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        tile.addView(footer);
+        String metadata = post.has("voterCount") ? jsonText(post, "voterCount", "0") + " votes" :
+                jsonText(post, "scope", "My record");
+        TextView count = text(metadata, 12, MUTED);
+        footer.addView(count, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView details = plazaAction("Details  ↗", Color.WHITE, TEAL,
+                () -> serverProposalDetails(jsonText(post, "id", "")));
+        footer.addView(details);
+        tile.setOnClickListener(view -> serverProposalDetails(jsonText(post, "id", "")));
+    }
+
+    private void serverProposalDetails(String id) {
+        BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
+        LinearLayout panel = groupSheet(sheet, "Buy check #" + id);
+        TextView state = text("Loading…", 14, MUTED);
+        panel.addView(state);
+        showModal(sheet);
+        new com.hku.money.data.LiveApi(requireContext()).request("GET", "purchase-proposals/" + id, null,
+                (data, error) -> {
+                    if (getView() == null || !sheet.isShowing()) return;
+                    if (error != null) { state.setText(error); return; }
+                    state.setVisibility(View.GONE);
+                    com.google.gson.JsonObject detail = data.getAsJsonObject();
+                    com.google.gson.JsonObject post = detail.getAsJsonObject("proposal");
+                    heading(panel, jsonText(post, "title", "Buy check"));
+                    if (post.has("amount") && !post.get("amount").isJsonNull()) {
+                        panel.addView(text(jsonText(post, "currency", "") + " " + jsonText(post, "amount", ""), 26, TEAL));
+                    }
+                    panel.addView(text(jsonText(post, "purchaseReason", ""), 15, INK));
+                    panel.addView(text(jsonText(post, "status", "") + " · "
+                            + jsonText(post, "voterCount", "0") + " votes", 14, MUTED));
+                    panel.addView(text("Deadline · " + jsonText(post, "deadlineAt", "Not published"), 13, MUTED));
+                });
+    }
+
+    private void loadServerPage(LinearLayout list, String endpoint, int page, Object generation) {
+        list.setTag(generation);
+        if (page == 1) list.removeAllViews();
+        TextView state = text("Loading…", 14, MUTED);
+        list.addView(state);
+        new com.hku.money.data.LiveApi(requireContext()).request("GET",
+                endpoint + "&page=" + page + "&size=20", null, (data, error) -> {
+                    if (getView() == null || list.getTag() != generation) return;
+                    list.removeView(state);
+                    if (error != null) {
+                        list.addView(text(error, 14, MUTED));
+                        TextView retry = plazaAction("Retry", BG, TEAL, () -> {
+                            list.removeAllViews();
+                            loadServerPage(list, endpoint, 1, new Object());
+                        });
+                        list.addView(retry);
+                        return;
+                    }
+                    com.google.gson.JsonObject result = data.getAsJsonObject();
+                    com.google.gson.JsonArray items = result.getAsJsonArray("items");
+                    for (com.google.gson.JsonElement item : items) serverProposalCard(list, item.getAsJsonObject());
+                    if (items.isEmpty() && page == 1) {
+                        emptyProfileCard(list, "No posts yet", "New buy checks will appear here.");
+                    }
+                    long total = result.get("total").getAsLong();
+                    if ((long) page * 20 < total) {
+                        TextView more = plazaAction("Load more", BG, TEAL, () -> {});
+                        list.addView(more);
+                        more.setOnClickListener(view -> {
+                            list.removeView(more);
+                            loadServerPage(list, endpoint, page + 1, generation);
+                        });
+                    }
+                });
+    }
+
+    private void livePlaza() {
+        plazaLabel(content, "BUY OR BYE  /  COMMUNITY");
+        LinearLayout header = new LinearLayout(requireContext());
+        header.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        content.addView(header);
+        TextView title = text("Plaza", 34, INK);
+        title.setTypeface(null, Typeface.BOLD);
+        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        header.addView(plazaAction("+ New", TEAL, Color.WHITE, () -> navigate(R.id.publishFragment)));
+        content.addView(text("A second opinion, before you spend.", 14, MUTED));
+
+        RadioGroup scope = choices(content, "", 0, "All posts", "My channels");
+        for (int i = 0; i < scope.getChildCount(); i++) {
+            RadioButton tab = (RadioButton) scope.getChildAt(i);
+            tab.setMinHeight(dp(44));
+        }
+        LinearLayout feedHeader = new LinearLayout(requireContext());
+        feedHeader.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        feedHeader.setPadding(0, dp(14), 0, 0);
+        content.addView(feedHeader);
+        TextView feedLabel = text("LATEST BUY CHECKS", 11, MUTED);
+        feedLabel.setLetterSpacing(.1f);
+        feedLabel.setTypeface(null, Typeface.BOLD);
+        feedHeader.addView(feedLabel, new LinearLayout.LayoutParams(0, -2, 1));
+
+        LinearLayout list = column();
+        content.addView(list);
+        Runnable refresh = () -> loadServerPage(list,
+                "plaza?scope=" + (picked(scope, 1) ? "MINE" : "ALL"), 1, new Object());
+        scope.setOnCheckedChangeListener((group, id) -> refresh.run());
+        TextView reload = plazaAction("↻", BG, TEAL, refresh);
+        reload.setTextSize(23);
+        reload.setContentDescription("Refresh feed");
+        feedHeader.addView(reload, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        refresh.run();
+    }
+
+    private void liveHistory(String initialPage) {
+        profileTitle("Buy check history", null);
+        int initial = "voted".equals(initialPage) ? 1 : "watching".equals(initialPage) ? 2 : 0;
+        RadioGroup tabs = choices(content, "", initial, "Submitted", "Voted", "Watching");
+        LinearLayout records = column();
+        content.addView(records);
+        Runnable refresh = () -> {
+            String type = picked(tabs, 0) ? "SUBMITTED" : picked(tabs, 1) ? "VOTED" : "WATCHED";
+            loadServerPage(records, "users/me/records?type=" + type, 1, new Object());
+        };
+        tabs.setOnCheckedChangeListener((group, id) -> refresh.run());
+        content.addView(plazaAction("Refresh", BG, TEAL, refresh));
+        refresh.run();
+    }
+
     private void plaza() {
+        if (!new com.hku.money.data.LiveApi(requireContext()).preview()) {
+            livePlaza();
+            return;
+        }
         plazaLabel(content, "BUY OR BYE  /  COMMUNITY");
         LinearLayout header = new LinearLayout(requireContext());
         header.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -528,6 +757,7 @@ public class SectionFragment extends Fragment {
                 if (channelPreferences().getBoolean(key, false)) addChannelChip(chips, channelLabel(key), key);
             }
         }
+        if (new com.hku.money.data.LiveApi(requireContext()).preview()) showLocalPublished(content, true);
         java.util.List<Proposal> posts = visibleProposals();
         if (posts.isEmpty()) {
             LinearLayout empty = card(content);
@@ -971,6 +1201,11 @@ public class SectionFragment extends Fragment {
 
     private void profile() {
         profileTitle("Profile", null);
+        content.addView(plazaAction("Log out", BG, TEAL, () -> {
+            new com.hku.money.data.LiveApi(requireContext()).clear();
+            startActivity(new android.content.Intent(requireContext(), com.hku.money.LoginActivity.class));
+            requireActivity().finish();
+        }));
         TextView avatar = text("TS", 26, Color.WHITE);
         avatar.setTypeface(null, Typeface.BOLD);
         avatar.setGravity(android.view.Gravity.CENTER);
@@ -1109,6 +1344,10 @@ public class SectionFragment extends Fragment {
     }
 
     private void history(String initialPage) {
+        if (!new com.hku.money.data.LiveApi(requireContext()).preview()) {
+            liveHistory(initialPage);
+            return;
+        }
         profileTitle("Buy check history", null);
         int initialTab = "voted".equals(initialPage) ? 1 : "watching".equals(initialPage) ? 2 : 0;
         LinearLayout searchPanel = card(content);
@@ -1119,6 +1358,9 @@ public class SectionFragment extends Fragment {
         content.addView(records);
         Runnable render = () -> {
             records.removeAllViews();
+            if (picked(tabs, 0) && new com.hku.money.data.LiveApi(requireContext()).preview()) {
+                showLocalPublished(records, false);
+            }
             String query = search.getText().toString().trim().toLowerCase(java.util.Locale.ROOT);
             java.util.Set<String> watched = profileSet("watching");
             for (Proposal proposal : SAMPLE_PROPOSALS) {
@@ -1399,12 +1641,13 @@ public class SectionFragment extends Fragment {
         }
         LinearLayout pricing = new LinearLayout(requireContext());
         item.addView(pricing);
-        select(fieldColumn(pricing), "Currency", CURRENCIES);
+        Spinner selectedCurrency = select(fieldColumn(pricing), "Currency", CURRENCIES);
         EditText amount = input(fieldColumn(pricing), "Price *", "0.00", false);
         amount.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         EditText reason = input(item, "Why do you want it? *", "What makes it worth buying?", true);
         limitedText(item, reason);
-        limitedText(item, input(item, "Cheaper alternatives", "Optional", true));
+        EditText alternative = input(item, "Cheaper alternatives", "Optional", true);
+        limitedText(item, alternative);
         fieldLabel(item, "Photos · Optional");
         item.addView(text("Choose up to 4 photos for this preview.", 13, MUTED));
         photoList = column();
@@ -1412,34 +1655,69 @@ public class SectionFragment extends Fragment {
         showPhotos();
 
         LinearLayout audience = formSection("02  /  THE AUDIENCE", "Where should it go?");
-        boolean fromWheel = getArguments() != null && getArguments().containsKey("wheel_item");
+        boolean fromWheel = new com.hku.money.data.LiveApi(requireContext()).preview() || getArguments() != null && getArguments().containsKey("wheel_item");
         RadioGroup destination = choices(audience, "Send to", fromWheel ? 1 : 0, "My group", "The Plaza");
         LinearLayout groupFields = column();
         audience.addView(groupFields);
-        java.util.List<ShoppingGroup> groups = savedGroups();
-        String[] groupOptions = new String[groups.size()];
-        String preselected = getArguments() == null ? null : getArguments().getString("group_code");
-        int selectedGroup = 0;
-        for (int i = 0; i < groups.size(); i++) {
-            ShoppingGroup group = groups.get(i);
-            groupOptions[i] = group.icon() + "  " + group.description();
-            if (group.code().equals(preselected)) selectedGroup = i;
-        }
-        select(groupFields, "Group", groupOptions).setSelection(selectedGroup);
+        Spinner groupPicker = select(groupFields, "Group", "Loading…");
         LinearLayout plazaFields = column();
         audience.addView(plazaFields);
-        select(plazaFields, "Channel", "General", "Food", "Tech", "Lifestyle");
+        Spinner channelPicker = select(plazaFields, "Channel", "Loading…");
+        Spinner tagPicker = select(audience, "Tag *", "Loading…");
+        com.google.gson.JsonArray[] dictionaries = new com.google.gson.JsonArray[3];
+        com.hku.money.data.LiveApi api = new com.hku.money.data.LiveApi(requireContext());
+        TextView networkStatus = text("Loading choices…", 13, MUTED);
+        audience.addView(networkStatus);
+        String[] endpoints = {"groups?size=100", "channels", "tags"};
+        Spinner[] pickers = {groupPicker, channelPicker, tagPicker};
+        if (api.preview()) {
+            String[][] names = {{"Sample shopping circle"}, {"General", "Food", "Tech", "Lifestyle"}, {"Everyday", "Treat", "Essential"}};
+            for (int slot = 0; slot < names.length; slot++) {
+                dictionaries[slot] = new com.google.gson.JsonArray();
+                for (int i = 0; i < names[slot].length; i++) {
+                    com.google.gson.JsonObject entry = new com.google.gson.JsonObject();
+                    entry.addProperty("id", i + 1);
+                    entry.addProperty("name", names[slot][i]);
+                    dictionaries[slot].add(entry);
+                }
+                pickers[slot].setAdapter(new ArrayAdapter<>(requireContext(),
+                        android.R.layout.simple_spinner_dropdown_item, names[slot]));
+            }
+            networkStatus.setText("Local Preview · Posts stay on this device");
+        }
+        for (int index = 0; !api.preview() && index < endpoints.length; index++) {
+            int slot = index;
+            api.request("GET", endpoints[index], null, (data, error) -> {
+                if (getView() == null) return;
+                if (error != null) {
+                    networkStatus.setText(error);
+                    return;
+                }
+                dictionaries[slot] = slot == 0 ? data.getAsJsonObject().getAsJsonArray("items") : data.getAsJsonArray();
+                java.util.List<String> labels = new java.util.ArrayList<>();
+                for (com.google.gson.JsonElement entry : dictionaries[slot]) {
+                    labels.add(entry.getAsJsonObject().get("name").getAsString());
+                }
+                if (labels.isEmpty()) labels.add("No groups available");
+                pickers[slot].setAdapter(new ArrayAdapter<>(requireContext(),
+                        android.R.layout.simple_spinner_dropdown_item, labels));
+                if (dictionaries[0] != null && dictionaries[1] != null && dictionaries[2] != null) {
+                    networkStatus.setText("Choices loaded from server");
+                }
+            });
+        }
         plazaFields.setVisibility(fromWheel ? View.VISIBLE : View.GONE);
         groupFields.setVisibility(fromWheel ? View.GONE : View.VISIBLE);
         destination.setOnCheckedChangeListener((group, id) -> {
             groupFields.setVisibility(picked(group, 0) ? View.VISIBLE : View.GONE);
             plazaFields.setVisibility(picked(group, 1) ? View.VISIBLE : View.GONE);
         });
-        input(audience, "Tags (optional)", "e.g. tech, everyday", false);
+
 
         LinearLayout voting = formSection("03  /  THE VOTE", "Set the ground rules");
         RadioGroup reviewers = choices(voting, "Who decides?", 0, "Multiple reviewers", "Single reviewer");
-        choices(voting, "Voting ends in", 2, "1 hr", "2 hrs", "24 hrs", "7 days");
+        reviewers.getChildAt(1).setEnabled(false);
+        RadioGroup duration = choices(voting, "Voting ends in", 2, "1 hr", "2 hrs", "24 hrs", "7 days");
         LinearLayout threshold = column();
         voting.addView(threshold);
         EditText minimum = input(threshold, "Minimum votes *", "Default: 3", false);
@@ -1454,11 +1732,17 @@ public class SectionFragment extends Fragment {
         });
         voting.addView(text("Results are calculated after the deadline.", 13, MUTED));
 
-        button(footer,"Review",()->{
+        TextView publishStatus = text("", 13, MUTED);
+        footer.addView(publishStatus);
+        String requestId = java.util.UUID.randomUUID().toString();
+        long[] draftId = {0};
+        TextView publishAction = plazaAction("Publish", TEAL, Color.WHITE, () -> {});
+        footer.addView(publishAction);
+        publishAction.setOnClickListener(view -> {
             boolean valid=true;
             if(name.getText().toString().trim().isEmpty()){name.setError("Enter an item name.");valid=false;}
             if(reason.getText().toString().trim().isEmpty()){reason.setError("Please add a reason.");valid=false;}
-            try {if(new BigDecimal(amount.getText().toString()).signum()<=0) throw new NumberFormatException();}catch(NumberFormatException ex){amount.setError("Enter a price above zero.");valid=false;}
+            try {if(!picked(voteType, 1) && new BigDecimal(amount.getText().toString()).signum()<=0) throw new NumberFormatException();}catch(NumberFormatException ex){amount.setError("Enter a price above zero.");valid=false;}
             try {if(picked(reviewers, 0) && Integer.parseInt(minimum.getText().toString())<1)throw new NumberFormatException();}catch(NumberFormatException ex){minimum.setError("Enter a whole number above zero.");valid=false;}
             if (picked(voteType, 1)) {
                 String first = firstOption.getText().toString().trim();
@@ -1469,7 +1753,114 @@ public class SectionFragment extends Fragment {
                     valid = false;
                 }
             }
-            if (valid) pending();
+            boolean groupScope = picked(destination, 0);
+            int dictionarySlot = groupScope ? 0 : 1;
+            if (dictionaries[dictionarySlot] == null || dictionaries[2] == null
+                    || dictionaries[dictionarySlot].isEmpty() || dictionaries[2].isEmpty()) {
+                publishStatus.setText("Choose an available group/channel and tag. Reopen this page to retry loading.");
+                return;
+            }
+            if (!photos.isEmpty()) {
+                publishStatus.setText("Photo upload is not connected yet. Remove photos to publish.");
+                return;
+            }
+            if (valid) {
+                com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
+                payload.addProperty("clientRequestId", requestId);
+                payload.addProperty("participationType", picked(voteType, 1) ? "OPTION" : "BINARY");
+                payload.addProperty("approvalMode", "MULTI");
+                payload.addProperty("publicationScope", groupScope ? "GROUP" : "PLAZA");
+                payload.addProperty("settlementMode", "TIME");
+                payload.addProperty("minimumVoterCount", Integer.parseInt(minimum.getText().toString()));
+                payload.addProperty("purchaseReason", reason.getText().toString().trim());
+                payload.addProperty("alternativeProductTip", alternative.getText().toString().trim());
+                if (picked(voteType, 1)) {
+                    payload.addProperty("pollQuestion", name.getText().toString().trim());
+                    com.google.gson.JsonArray optionsBody = new com.google.gson.JsonArray();
+                    for (EditText option : new EditText[]{firstOption, secondOption}) {
+                        com.google.gson.JsonObject entry = new com.google.gson.JsonObject();
+                        entry.addProperty("text", option.getText().toString().trim());
+                        optionsBody.add(entry);
+                    }
+                    payload.add("options", optionsBody);
+                } else {
+                    payload.addProperty("itemName", name.getText().toString().trim());
+                    payload.addProperty("amount", new BigDecimal(amount.getText().toString()));
+                    payload.addProperty("currency", selectedCurrency.getSelectedItem().toString());
+                }
+                com.google.gson.JsonArray tags = new com.google.gson.JsonArray();
+                tags.add(dictionaries[2].get(tagPicker.getSelectedItemPosition()).getAsJsonObject().get("id"));
+                payload.add("tagIds", tags);
+                if (groupScope) {
+                    payload.add("groupId", dictionaries[0].get(groupPicker.getSelectedItemPosition()).getAsJsonObject().get("id"));
+                } else {
+                    com.google.gson.JsonArray channels = new com.google.gson.JsonArray();
+                    channels.add(dictionaries[1].get(channelPicker.getSelectedItemPosition()).getAsJsonObject().get("id"));
+                    payload.add("channelIds", channels);
+                }
+                if (api.preview()) {
+                    int[] hours = {1, 2, 24, 168};
+                    int selected = 2;
+                    for (int i = 0; i < 4; i++) if (picked(duration, i)) selected = i;
+                    payload.addProperty("durationHours", hours[selected]);
+                    com.google.gson.JsonArray posts = localPublished();
+                    boolean exists = false;
+                    for (com.google.gson.JsonElement post : posts) {
+                        if (requestId.equals(post.getAsJsonObject().get("clientRequestId").getAsString())) exists = true;
+                    }
+                    if (!exists) posts.add(payload);
+                    boolean stored = requireContext().getSharedPreferences("preview_published", 0).edit()
+                            .putString("items", posts.toString()).commit();
+                    if (!stored) { publishStatus.setText("Could not save. Please try again."); return; }
+                    publishAction.setEnabled(false);
+                    publishStatus.setText("Published locally");
+                    showModal(new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                            .setTitle("Published in Preview")
+                            .setMessage("Find your post in Submitted" + (groupScope ? "." : " and Plaza."))
+                            .setPositiveButton("View post", (dialog, which) -> {
+                                Bundle args = new Bundle();
+                                args.putString("profile_page", "submitted");
+                                NavHostFragment.findNavController(this).navigate(R.id.profilePageFragment, args);
+                            }).create());
+                    return;
+                }
+                publishAction.setEnabled(false);
+                publishStatus.setText("Saving…");
+                String path = draftId[0] == 0 ? "purchase-proposals" : "purchase-proposals/" + draftId[0];
+                api.request(draftId[0] == 0 ? "POST" : "PUT", path, payload, (saved, saveError) -> {
+                    if (getView() == null) return;
+                    if (saveError != null) {
+                        publishAction.setEnabled(true);
+                        publishStatus.setText(saveError);
+                        return;
+                    }
+                    draftId[0] = saved.getAsJsonObject().getAsJsonObject("proposal").get("id").getAsLong();
+                    publishStatus.setText("Publishing…");
+                    com.google.gson.JsonObject publishBody = new com.google.gson.JsonObject();
+                    int[] hours = {1, 2, 24, 168};
+                    int selected = 2;
+                    for (int i = 0; i < 4; i++) if (picked(duration, i)) selected = i;
+                    publishBody.addProperty("durationHours", hours[selected]);
+                    api.request("POST", "purchase-proposals/" + draftId[0] + "/publish", publishBody, (published, publishError) -> {
+                        if (getView() == null) return;
+                        publishAction.setEnabled(true);
+                        if (publishError != null) {
+                            publishStatus.setText(publishError + " Your draft is saved. Retry here.");
+                            return;
+                        }
+                        publishAction.setEnabled(false);
+                        publishStatus.setText("Published · #" + draftId[0]);
+                        showModal(new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                                .setTitle("Published!")
+                                .setMessage("Buy check #" + draftId[0] + " is live on the server.")
+                                .setPositiveButton("View post", (dialog, which) -> {
+                                    Bundle args = new Bundle();
+                                    args.putString("profile_page", "submitted");
+                                    NavHostFragment.findNavController(this).navigate(R.id.profilePageFragment, args);
+                                }).create());
+                    });
+                });
+            }
             else for (EditText field : new EditText[]{firstOption, secondOption, name, amount, reason, minimum}) {
                 if (field.isShown() && field.getError() != null) { field.requestFocus(); break; }
             }
