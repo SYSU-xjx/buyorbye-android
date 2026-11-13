@@ -26,6 +26,25 @@ public class LoginActivity extends AppCompatActivity {
     private static final int MUTED = 0xff56665e;
     private static final int MINT = 0xfff2faf1;
     private boolean registering;
+    private Runnable pendingNetworkAction;
+    private final androidx.activity.result.ActivityResultLauncher<String> localNetworkPermission =
+            registerForActivityResult(new androidx.activity.result.contract.ActivityResultContracts.RequestPermission(), granted -> {
+                Runnable action = pendingNetworkAction;
+                pendingNetworkAction = null;
+                if (granted && action != null) action.run();
+                else if (!granted) android.widget.Toast.makeText(this,
+                        "Allow local network access to connect to this server.", android.widget.Toast.LENGTH_LONG).show();
+            });
+
+    private boolean requestLocalNetworkAccess(Runnable retry) {
+        if (android.os.Build.VERSION.SDK_INT < 37 || checkSelfPermission(
+                android.Manifest.permission.ACCESS_LOCAL_NETWORK) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return false;
+        }
+        pendingNetworkAction = retry;
+        localNetworkPermission.launch(android.Manifest.permission.ACCESS_LOCAL_NETWORK);
+        return true;
+    }
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -143,6 +162,7 @@ public class LoginActivity extends AppCompatActivity {
             if (registering && (pass.length() < 8 || pass.length() > 72)) {
                 passBox.setError("Use 8–72 characters"); return;
             }
+            if (requestLocalNetworkAccess(submit::performClick)) return;
             boolean createAccount = registering;
             submit.setEnabled(false);
             mode.setEnabled(false);
@@ -221,6 +241,7 @@ public class LoginActivity extends AppCompatActivity {
         docs.setMinHeight(dp(48));
         panel.addView(docs);
         test.setOnClickListener(view -> {
+            if (requestLocalNetworkAccess(test::performClick)) return;
             test.setEnabled(false);
             status.setText("Checking API docs…");
             api.testConnection(address.getText().toString(), (data, error) -> {

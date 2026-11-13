@@ -14,10 +14,15 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        if (!new com.hku.money.data.LiveApi(this).signedIn()) {
+        com.hku.money.data.LiveApi api = new com.hku.money.data.LiveApi(this);
+        if (!api.signedIn()) {
             startActivity(new android.content.Intent(this, LoginActivity.class));
             finish();
             return;
+        }
+        if (!api.preview() && android.os.Build.VERSION.SDK_INT >= 37 && checkSelfPermission(
+                android.Manifest.permission.ACCESS_LOCAL_NETWORK) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.ACCESS_LOCAL_NETWORK}, 1);
         }
         setContentView(R.layout.activity_main);
 

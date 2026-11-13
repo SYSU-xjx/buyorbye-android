@@ -115,6 +115,7 @@ public final class LiveApi {
                     }
                 }
             } catch (Exception failure) {
+                android.util.Log.e("LiveApi", "Request failed: " + method + " " + path, failure);
                 error = "Cannot reach the server. Check your connection and try again.";
             }
             com.google.gson.JsonElement value = data;
