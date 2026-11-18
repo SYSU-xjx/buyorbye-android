@@ -72,10 +72,22 @@ public final class LiveApi {
         });
     }
 
-    public boolean signedIn() { return preferences.contains("token") || preview(); }
+    private static boolean previewActive;
+    public boolean signedIn() {
+        if (previewActive && preview()) return true;
+        String token = preferences.getString("token", "");
+        try {
+            String payload = new String(android.util.Base64.decode(token.split("\\.")[1],
+                    android.util.Base64.URL_SAFE), java.nio.charset.StandardCharsets.UTF_8);
+            long expiry = new com.google.gson.Gson().fromJson(payload, JsonObject.class).get("exp").getAsLong();
+            return expiry > System.currentTimeMillis() / 1000;
+        } catch (RuntimeException error) {
+            return false;
+        }
+    }
     public boolean preview() { return preferences.getBoolean("preview", false); }
-    public void startPreview() { clear(); preferences.edit().putBoolean("preview", true).apply(); }
-    public void clear() { preferences.edit().remove("token").remove("preview").apply(); }
+    public void startPreview() { clear(); previewActive = true; preferences.edit().putBoolean("preview", true).apply(); }
+    public void clear() { previewActive = false; preferences.edit().remove("token").remove("preview").apply(); }
     public void saveToken(String token) { preferences.edit().putString("token", token).putBoolean("preview", false).apply(); }
     public String deviceId() {
         String id = preferences.getString("device", null);

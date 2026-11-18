@@ -48,6 +48,10 @@ public class SectionFragment extends Fragment {
         if (android.os.Build.VERSION.SDK_INT >= 31 && getActivity() != null) {
             getActivity().findViewById(android.R.id.content).setRenderEffect(null);
         }
+        homePoll.removeCallbacks(homeTick);
+        refreshHome = null;
+        screenRendered = false;
+        screenFooter = null;
         photoList = null;
         content = null;
         super.onDestroyView();
@@ -152,27 +156,46 @@ public class SectionFragment extends Fragment {
                 .setPositiveButton("OK", null)
                 .create());
     }
-    @Nullable @Override public View onCreateView(@NonNull LayoutInflater inflater,@Nullable ViewGroup container,@Nullable Bundle state) {
-        ScrollView scroll=new ScrollView(requireContext()); scroll.setFillViewport(true); scroll.setBackgroundColor(BG);
-        content=column(); content.setPadding(dp(20),dp(14),dp(20),dp(24)); scroll.addView(content);
-        int id=NavHostFragment.findNavController(this).getCurrentDestination().getId();
-        if(id==R.id.publishFragment) {
+    private boolean screenRendered;
+    private LinearLayout screenFooter;
+
+    @Nullable @Override public View onCreateView(@NonNull LayoutInflater inflater,
+            @Nullable ViewGroup container, @Nullable Bundle state) {
+        ScrollView scroll = new ScrollView(requireContext());
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        content = column();
+        content.setPadding(dp(20), dp(14), dp(20), dp(24));
+        scroll.addView(content);
+        if (NavHostFragment.findNavController(this).getCurrentDestination().getId() == R.id.publishFragment) {
             LinearLayout screen = column();
             screen.setBackgroundColor(BG);
             screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-            LinearLayout footer = column();
-            footer.setBackgroundColor(Color.WHITE);
-            footer.setPadding(dp(20), dp(4), dp(20), dp(12));
-            screen.addView(footer);
-            publish(footer);
+            screenFooter = column();
+            screenFooter.setBackgroundColor(Color.WHITE);
+            screenFooter.setPadding(dp(20), dp(4), dp(20), dp(12));
+            screen.addView(screenFooter);
             return screen;
-        } else if(id==R.id.channelsFragment) channels();
-        else if(id==R.id.groupsFragment) groups(); else if(id==R.id.plazaFragment) plaza();
-        else if(id==R.id.profileFragment) profile(); else if(id==R.id.profilePageFragment) profilePage(); else home();
+        }
         return scroll;
     }
+
+    @Override public void onStart() {
+        super.onStart();
+        if (screenRendered) return;
+        screenRendered = true;
+        int id = NavHostFragment.findNavController(this).getCurrentDestination().getId();
+        if (id == R.id.publishFragment) publish(screenFooter);
+        else if (id == R.id.channelsFragment) channels();
+        else if (id == R.id.groupsFragment) groups();
+        else if (id == R.id.plazaFragment) plaza();
+        else if (id == R.id.profileFragment) profile();
+        else if (id == R.id.profilePageFragment) profilePage();
+        else home();
+    }
+
     private void title(String value) {
-        TextView eyebrow = text("BUY OR BYE   /   PREVIEW", 11, TEAL);
+        TextView eyebrow = text(new com.hku.money.data.LiveApi(requireContext()).preview() ? "BUY OR BYE   /   PREVIEW" : "BUY OR BYE", 11, TEAL);
         eyebrow.setLetterSpacing(0.12f);
         eyebrow.setTypeface(null, Typeface.BOLD);
         content.addView(eyebrow);
@@ -225,7 +248,130 @@ public class SectionFragment extends Fragment {
         }
     }
 
+    private final android.os.Handler homePoll = new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable refreshHome;
+    private final Runnable homeTick = new Runnable() {
+        @Override public void run() {
+            if (isResumed() && refreshHome != null) {
+                refreshHome.run();
+                homePoll.postDelayed(this, 15000);
+            }
+        }
+    };
+
+    @Override public void onResume() {
+        super.onResume();
+        homePoll.removeCallbacks(homeTick);
+        if (refreshHome != null) homePoll.postDelayed(homeTick, 15000);
+    }
+
+    @Override public void onPause() {
+        homePoll.removeCallbacks(homeTick);
+        super.onPause();
+    }
+
+    private void homeRecords(com.hku.money.data.LiveApi api, int page,
+                             com.google.gson.JsonArray accumulated,
+                             java.util.function.Consumer<com.google.gson.JsonArray> done,
+                             java.util.function.Consumer<String> failure) {
+        api.request("GET", "users/me/records?type=SUBMITTED&page=" + page + "&size=100", null, (data, error) -> {
+            if (getView() == null || !isAdded()) return;
+            if (error != null) { failure.accept(error); return; }
+            com.google.gson.JsonObject result = data.getAsJsonObject();
+            com.google.gson.JsonArray items = result.getAsJsonArray("items");
+            accumulated.addAll(items);
+            if (!items.isEmpty() && accumulated.size() < result.get("total").getAsInt()) {
+                homeRecords(api, page + 1, accumulated, done, failure);
+            } else done.accept(accumulated);
+        });
+    }
+
+    private void liveHome() {
+        title("What’s on your wishlist?");
+        content.addView(text("A little pause. A better buy.", 15, MUTED));
+        com.hku.money.data.LiveApi api = new com.hku.money.data.LiveApi(requireContext());
+        android.content.SharedPreferences preferences = requireContext().getSharedPreferences("home_preferences", 0);
+        LinearLayout hero = card(content);
+        hero.setBackground(surface(TEAL));
+        TextView picker = plazaAction(preferences.getString("display_currency", "CNY") + " ▾", LIME, INK, () -> {});
+        LinearLayout top = new LinearLayout(requireContext());
+        top.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        hero.addView(top);
+        TextView label = text("TOTAL SAVED", 12, LIME);
+        top.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        top.addView(picker);
+        TextView amount = text("—", 38, Color.WHITE);
+        hero.addView(amount);
+        TextView totals = text("Loading…", 14, Color.WHITE);
+        hero.addView(totals);
+        TextView ratio = text("", 14, LIME);
+        hero.addView(ratio);
+        hero.addView(text("Settled, rejected buy checks · selected currency only", 12, Color.WHITE));
+        LinearLayout stats = card(content);
+        TextView submitted = text("", 15, TEAL);
+        stats.addView(submitted);
+        TextView progress = text("", 14, MUTED);
+        stats.addView(progress);
+        TextView errorMessage = text("", 13, MUTED);
+        content.addView(errorMessage);
+        boolean[] loading = {false};
+        refreshHome = () -> {
+            if (loading[0]) return;
+            loading[0] = true;
+            errorMessage.setText("Updating…");
+            homeRecords(api, 1, new com.google.gson.JsonArray(), records -> {
+                loading[0] = false;
+                int approved = 0, rejected = 0, open = 0;
+                BigDecimal saved = BigDecimal.ZERO;
+                String code = preferences.getString("display_currency", "CNY");
+                for (com.google.gson.JsonElement entry : records) {
+                    com.google.gson.JsonObject record = entry.getAsJsonObject();
+                    String status = jsonText(record, "status", "");
+                    if ("OPEN".equals(status)) open++;
+                    if (!"SETTLED".equals(status)) continue;
+                    if ("BUY".equals(jsonText(record, "decisionResult", ""))) approved++;
+                    if ("NOT_BUY".equals(jsonText(record, "decisionResult", ""))) {
+                        rejected++;
+                        if (code.equals(jsonText(record, "currency", "")) && record.has("amount") && !record.get("amount").isJsonNull()) {
+                            saved = saved.add(record.get("amount").getAsBigDecimal());
+                        }
+                    }
+                }
+                amount.setText(code + " " + saved.toPlainString());
+                totals.setText(approved + " approved  ·  " + rejected + " rejected");
+                int decided = approved + rejected;
+                ratio.setText("Rejection rate: " + (decided == 0 ? 0 : Math.round(100.0 * rejected / decided)) + "%");
+                progress.setText(open + " awaiting results");
+                errorMessage.setText("Results update after the voting deadline.");
+            }, failure -> {
+                loading[0] = false;
+                errorMessage.setText(failure);
+            });
+            api.request("GET", "users/me/statistics", null, (data, error) -> {
+                if (getView() == null) return;
+                if (error == null) {
+                    com.google.gson.JsonObject statistics = data.getAsJsonObject();
+                    submitted.setText(jsonText(statistics, "submittedCount", "0") + " submitted  ·  "
+                            + jsonText(statistics, "receivedFlowerCount", "0") + " flowers");
+                }
+            });
+        };
+        picker.setOnClickListener(v -> chooseCurrency(preferences.getString("display_currency", "CNY"), code -> {
+            preferences.edit().putString("display_currency", code).apply();
+            picker.setText(code + " ▾");
+            if (refreshHome != null) refreshHome.run();
+        }));
+        content.addView(plazaAction("Refresh", BG, TEAL, () -> refreshHome.run()));
+        button(content, "Start a buy check", () -> navigate(R.id.publishFragment));
+        content.addView(plazaAction("My submitted buy checks  →", BG, TEAL, () -> openProfilePage("submitted")));
+        refreshHome.run();
+    }
+
     private void home() {
+        if (!new com.hku.money.data.LiveApi(requireContext()).preview()) {
+            liveHome();
+            return;
+        }
         title("What’s on your wishlist?"); content.addView(text("Good buys start with a second opinion.", 15, MUTED));
         LinearLayout c = card(content);
         c.setBackground(surface(TEAL));
@@ -317,6 +463,7 @@ public class SectionFragment extends Fragment {
         content.addView(actions);
         button(fieldColumn(actions), "+ Create a group", this::createGroup);
         button(fieldColumn(actions), "Join with code", this::joinGroup);
+        groupWheel(content);
         for (ShoppingGroup group : savedGroups()) {
             LinearLayout tile = card(content);
             heading(tile, group.icon() + "  " + group.name());
@@ -334,6 +481,7 @@ public class SectionFragment extends Fragment {
         content.addView(actions);
         button(fieldColumn(actions), "+ Create a group", this::createGroup);
         button(fieldColumn(actions), "Join with code", this::joinGroup);
+        groupWheel(content);
         LinearLayout list = column();
         content.addView(list);
         new com.hku.money.data.LiveApi(requireContext()).request("GET", "groups?size=100", null, (data, error) -> {
@@ -358,10 +506,24 @@ public class SectionFragment extends Fragment {
         LinearLayout panel = groupSheet(sheet, jsonText(group, "name", "Group"));
         panel.addView(text(jsonText(group, "memberCount", "0") + " members", 15, MUTED));
         panel.addView(text("Invite code  ·  " + jsonText(group, "inviteCode", ""), 15, INK));
-        button(panel, "New buy check", () -> { sheet.dismiss(); navigate(R.id.publishFragment); });
+        button(panel, "New buy check", () -> {
+            sheet.dismiss();
+            Bundle args = new Bundle();
+            args.putString("group_code", id);
+            NavHostFragment.findNavController(this).navigate(R.id.publishFragment, args);
+        });
+        LinearLayout proposals = column();
+        panel.addView(proposals);
+        heading(proposals, "Group buy checks");
+        LinearLayout feed = column();
+        proposals.addView(feed);
+        Runnable refresh = () -> loadServerPage(feed, "groups/" + id + "/purchase-proposals?view=all", 1, new Object());
+        panel.addView(plazaAction("Refresh", BG, TEAL, refresh));
+        refresh.run();
         button(panel, "Leave group", () -> new com.hku.money.data.LiveApi(requireContext()).request("DELETE",
                 "groups/" + id + "/members/me", null, (data, error) -> {
-                    if (error != null) return;
+                    if (getView() == null || !sheet.isShowing()) return;
+                    if (error != null) { panel.addView(text(error, 13, MUTED)); return; }
                     sheet.dismiss(); content.removeAllViews(); groups();
                 }));
         showModal(sheet);
@@ -436,6 +598,7 @@ public class SectionFragment extends Fragment {
                 com.google.gson.JsonObject body = new com.google.gson.JsonObject();
                 body.addProperty("name", value);
                 new com.hku.money.data.LiveApi(requireContext()).request("POST", "groups", body, (data, error) -> {
+                    if (getView() == null || !sheet.isShowing()) return;
                     if (error != null) { name.setError(error); return; }
                     sheet.dismiss(); content.removeAllViews(); groups();
                 });
@@ -466,7 +629,7 @@ public class SectionFragment extends Fragment {
         BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
         LinearLayout panel = groupSheet(sheet, "Join a group");
         if (new com.hku.money.data.LiveApi(requireContext()).preview()) panel.addView(text("Demo code: 382615", 14, MUTED));
-        EditText code = input(panel, "6-digit group code *", "e.g. 382615", false);
+        EditText code = input(panel, new com.hku.money.data.LiveApi(requireContext()).preview() ? "6-digit code *" : "8-digit invite code *", "Invite code", false);
         code.setInputType(InputType.TYPE_CLASS_NUMBER);
         code.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(
                 new com.hku.money.data.LiveApi(requireContext()).preview() ? 6 : 8)});
@@ -481,6 +644,7 @@ public class SectionFragment extends Fragment {
                 com.google.gson.JsonObject body = new com.google.gson.JsonObject();
                 body.addProperty("inviteCode", value);
                 new com.hku.money.data.LiveApi(requireContext()).request("POST", "groups/join", body, (data, error) -> {
+                    if (getView() == null || !sheet.isShowing()) return;
                     if (error != null) { code.setError(error); return; }
                     sheet.dismiss(); content.removeAllViews(); groups();
                 });
@@ -699,19 +863,76 @@ public class SectionFragment extends Fragment {
                     panel.addView(text(jsonText(post, "status", "") + " · "
                             + jsonText(post, "voterCount", "0") + " votes", 14, MUTED));
                     panel.addView(text("Deadline · " + jsonText(post, "deadlineAt", "Not published"), 13, MUTED));
+                    com.google.gson.JsonArray tally = detail.getAsJsonArray("voteTally");
+                    if (tally != null && !tally.isEmpty()) {
+                        heading(panel, "Current votes");
+                        for (com.google.gson.JsonElement entry : tally) {
+                            com.google.gson.JsonObject vote = entry.getAsJsonObject();
+                            panel.addView(text(jsonText(vote, "choice", "Option " + jsonText(vote, "optionId", ""))
+                                    + " · " + jsonText(vote, "voteCount", "0"), 14, TEAL));
+                        }
+                    }
                     String proposalId = jsonText(post, "id", id);
-                    com.google.gson.JsonObject myVote = detail.getAsJsonObject("myVote");
-                    if (myVote == null || myVote.isJsonNull()) {
+                    boolean owner = detail.has("ownedByViewer") && detail.get("ownedByViewer").getAsBoolean();
+                    if (!owner && "PLAZA".equals(jsonText(detail, "publicationScope", ""))) {
+                        String authorName = jsonText(post, "authorName", "Shopper");
+                        panel.addView(plazaAction("Block " + authorName, BG, TEAL, () ->
+                                showModal(new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                                        .setTitle("Block this account?")
+                                        .setMessage("Their posts will be hidden on this device.")
+                                        .setNegativeButton("Cancel", null)
+                                        .setPositiveButton("Block", (dialog, which) -> {
+                                            java.util.Set<String> blocked = profileSet("blocked");
+                                            blocked.add(authorName);
+                                            saveProfileSet("blocked", blocked);
+                                            sheet.dismiss();
+                                            if (getView() != null) {
+                                                int destination = NavHostFragment.findNavController(this).getCurrentDestination().getId();
+                                                if (destination == R.id.plazaFragment) refreshPlaza();
+                                            }
+                                        }).create())));
+                    }
+                    if (owner && "DRAFT".equals(jsonText(post, "status", ""))) {
+                        button(panel, "Publish draft", () -> {
+                            com.google.gson.JsonObject body = new com.google.gson.JsonObject();
+                            body.addProperty("durationHours", 24);
+                            new com.hku.money.data.LiveApi(requireContext()).request("POST",
+                                    "purchase-proposals/" + proposalId + "/publish", body, (saved, failure) -> {
+                                if (getView() == null || !sheet.isShowing()) return;
+                                if (failure != null) { state.setVisibility(View.VISIBLE); state.setText(failure); return; }
+                                sheet.dismiss();
+                                serverProposalDetails(proposalId);
+                            });
+                        });
+                    }
+                    if (detail.has("canWithdraw") && detail.get("canWithdraw").getAsBoolean()) {
+                        button(panel, "Withdraw", () -> showModal(new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                                .setTitle("Withdraw this buy check?")
+                                .setNegativeButton("Cancel", null)
+                                .setPositiveButton("Withdraw", (dialog, which) ->
+                                        new com.hku.money.data.LiveApi(requireContext()).request("POST",
+                                                "purchase-proposals/" + proposalId + "/withdraw", null, (saved, failure) -> {
+                                            if (getView() == null || !sheet.isShowing()) return;
+                                            if (failure != null) { state.setVisibility(View.VISIBLE); state.setText(failure); return; }
+                                            sheet.dismiss();
+                                            serverProposalDetails(proposalId);
+                                        })).create()));
+                    }
+
+                    if ("OPEN".equals(jsonText(post, "status", ""))
+                            && !detail.get("ownedByViewer").getAsBoolean()) {
                         button(panel, "Vote", () -> serverVote(proposalId, detail, sheet));
                     }
+                    if ("PLAZA".equals(jsonText(detail, "publicationScope", ""))) {
                     boolean watching = post.has("watching") && post.get("watching").getAsBoolean();
                     button(panel, watching ? "Stop watching" : "Watch buy check", () ->
                             new com.hku.money.data.LiveApi(requireContext()).request(watching ? "DELETE" : "PUT",
                                     "purchase-proposals/" + proposalId + "/watches", null, (result, requestError) -> {
                                         if (getView() == null || !sheet.isShowing()) return;
-                                        if (requestError != null) state.setText(requestError);
+                                        if (requestError != null) { state.setVisibility(View.VISIBLE); state.setText(requestError); }
                                         else { sheet.dismiss(); serverProposalDetails(proposalId); }
                                     }));
+                    }
                 });
     }
 
@@ -728,7 +949,11 @@ public class SectionFragment extends Fragment {
                     .toArray(String[]::new)
                 : new String[]{"Buy it", "Wait"};
         RadioGroup choice = choices(panel, "Your vote", -1, labels);
+        String[] requestId = {java.util.UUID.randomUUID().toString()};
+        String[] previousVote = {null};
+        boolean[] submitting = {false};
         button(panel, "Submit vote", () -> {
+            if (submitting[0]) return;
             String value = reason.getText().toString().trim();
             if (value.isEmpty()) { reason.setError("Add a reason to submit your vote."); return; }
             int selected = -1;
@@ -737,18 +962,34 @@ public class SectionFragment extends Fragment {
             }
             if (selected < 0) { reason.setError("Choose your vote."); return; }
             com.google.gson.JsonObject body = new com.google.gson.JsonObject();
-            body.addProperty("clientRequestId", java.util.UUID.randomUUID().toString());
+
             if (optionVote) body.addProperty("optionId", options.get(selected).getAsJsonObject().get("id").getAsLong());
             else body.addProperty("choice", selected == 0 ? "BUY" : "NOT_BUY");
             body.addProperty("reason", value);
+            String fingerprint = body.toString();
+            if (previousVote[0] != null && !previousVote[0].equals(fingerprint)) requestId[0] = java.util.UUID.randomUUID().toString();
+            previousVote[0] = fingerprint;
+            body.addProperty("clientRequestId", requestId[0]);
+            submitting[0] = true;
             new com.hku.money.data.LiveApi(requireContext()).request("POST", "purchase-proposals/" + id + "/votes", body,
                     (result, error) -> {
+                        submitting[0] = false;
                         if (getView() == null || !sheet.isShowing()) return;
                         if (error != null) { reason.setError(error); return; }
                         sheet.dismiss(); details.dismiss(); serverProposalDetails(id);
                     });
         });
         showModal(sheet);
+    }
+
+    private boolean hiddenFromFeed(com.google.gson.JsonObject post) {
+        if (profileSet("blocked").contains(jsonText(post, "authorName", ""))) return true;
+        String searchable = (jsonText(post, "title", "") + " " + jsonText(post, "purchaseReason", "")
+                + " " + jsonText(post, "alternativeProductTip", "")).toLowerCase(java.util.Locale.ROOT);
+        for (String word : channelPreferences().getString("muted", "").split("[,\n]")) {
+            if (!word.isBlank() && searchable.contains(word.trim().toLowerCase(java.util.Locale.ROOT))) return true;
+        }
+        return false;
     }
 
     private void loadServerPage(LinearLayout list, String endpoint, int page, Object generation) {
@@ -771,8 +1012,14 @@ public class SectionFragment extends Fragment {
                     }
                     com.google.gson.JsonObject result = data.getAsJsonObject();
                     com.google.gson.JsonArray items = result.getAsJsonArray("items");
-                    for (com.google.gson.JsonElement item : items) serverProposalCard(list, item.getAsJsonObject());
-                    if (items.isEmpty() && page == 1) {
+                    int displayed = 0;
+                    for (com.google.gson.JsonElement item : items) {
+                        com.google.gson.JsonObject post = item.getAsJsonObject();
+                        if (endpoint.startsWith("plaza?") && hiddenFromFeed(post)) continue;
+                        serverProposalCard(list, post);
+                        displayed++;
+                    }
+                    if (displayed == 0 && page == 1) {
                         emptyProfileCard(list, "No posts yet", "New buy checks will appear here.");
                     }
                     long total = result.get("total").getAsLong();
@@ -1125,6 +1372,21 @@ public class SectionFragment extends Fragment {
         return "Juror";
     }
 
+    private void serverReputation() {
+        BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
+        LinearLayout panel = groupSheet(sheet, "Judge Badge");
+        TextView status = text("Loading…", 15, TEAL);
+        panel.addView(status);
+        showModal(sheet);
+        new com.hku.money.data.LiveApi(requireContext()).request("GET", "users/me/reputation", null, (data, error) -> {
+            if (getView() == null || !sheet.isShowing()) return;
+            if (error != null) { status.setText(error); return; }
+            com.google.gson.JsonObject score = data.getAsJsonObject();
+            status.setText(jsonText(score, "score", "0") + " pts · Vote weight " + jsonText(score, "votingWeight", "1"));
+            panel.addView(text("Points are awarded after settlement for votes matching the result.", 14, MUTED));
+        });
+    }
+
     private void judgeBadge() {
         int points = playPreferences().getInt("points", 0);
         int next = points < 15 ? 15 : points < 50 ? 50 : 100;
@@ -1152,7 +1414,7 @@ public class SectionFragment extends Fragment {
         if (!preview) {
             Runnable load = () -> {
                 list.removeAllViews();
-                String type = picked(category, 0) ? "HIGHEST_APPROVED_AMOUNT" : "MOST_REJECTED";
+                String type = picked(category, 0) ? "MOST_REJECTED" : "HIGHEST_APPROVED_AMOUNT";
                 String window = picked(period, 0) ? "DAY" : picked(period, 1) ? "WEEK" : "MONTH";
                 new com.hku.money.data.LiveApi(requireContext()).request("GET",
                         "rankings?type=" + type + "&period=" + window + "&page=1&size=20", null,
@@ -1249,10 +1511,17 @@ public class SectionFragment extends Fragment {
         showModal(sheet);
     }
 
-    private void decisionWheel() {
-        BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
-        LinearLayout panel = groupSheet(sheet, "Wheel of Maybe");
-        EditText item = input(panel, "What’s in your cart?", "Optional item name", false);
+    private void groupWheel(LinearLayout parent) {
+        LinearLayout panel = card(parent);
+        LinearLayout header = new LinearLayout(requireContext());
+        header.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        panel.addView(header);
+        TextView title = text("Wheel of Maybe", 20, INK);
+        title.setTypeface(null, Typeface.BOLD);
+        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        header.addView(text("TAP TO SPIN", 10, TEAL));
+
+        EditText item = new EditText(requireContext());
         item.setText(playPreferences().getString("tomorrow_item", ""));
         String[] outcomes = {"Buy it", "Skip it", "Sleep on it"};
         String[] advice = {"Check your budget, then go for it.", "Your wallet just breathed a sigh of relief.",
@@ -1281,17 +1550,20 @@ public class SectionFragment extends Fragment {
                 canvas.drawCircle(x, y, dp(7), paint);
             }
         };
-        LinearLayout.LayoutParams wheelLayout = new LinearLayout.LayoutParams(-1, dp(210));
+        LinearLayout.LayoutParams wheelLayout = new LinearLayout.LayoutParams(-1, dp(170));
         wheelLayout.topMargin = dp(8);
         panel.addView(wheel, wheelLayout);
         TextView result = text("", 15, INK);
         panel.addView(result);
         LinearLayout actions = column();
         TextView spin = plazaAction("Spin", TEAL, Color.WHITE, () -> {});
-        panel.addView(spin);
+        spin.setVisibility(View.GONE);
+        wheel.setContentDescription("Spin decision wheel");
+        wheel.setFocusable(true);
         panel.addView(actions);
         spin.setOnClickListener(v -> {
             spin.setEnabled(false);
+            wheel.setEnabled(false);
             actions.removeAllViews();
             result.setText("");
             int pick = java.util.concurrent.ThreadLocalRandom.current().nextInt(3);
@@ -1301,25 +1573,50 @@ public class SectionFragment extends Fragment {
             wheel.animate().rotation(current + 1080 + distance).setDuration(1100)
                     .setInterpolator(new android.view.animation.DecelerateInterpolator())
                     .withEndAction(() -> {
-                        if (!sheet.isShowing()) return;
+                        if (getView() == null || !wheel.isAttachedToWindow()) return;
                         spin.setEnabled(true);
+                        wheel.setEnabled(true);
                         spin.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK);
                         result.setText(outcomes[pick] + "  ·  " + advice[pick]);
                         if (pick == 2) actions.addView(plazaAction("Save for tomorrow", BG, TEAL, () -> {
                             String name = item.getText().toString().trim();
-                            if (name.isEmpty()) { item.setError("Enter an item to save."); return; }
+                            if (name.isEmpty()) {
+                                BottomSheetDialog saveSheet = new BottomSheetDialog(requireContext());
+                                LinearLayout body = groupSheet(saveSheet, "Save for tomorrow");
+                                EditText nameInput = input(body, "Item name", "What caught your eye?", false);
+                                button(body, "Save", () -> {
+                                    String value = nameInput.getText().toString().trim();
+                                    if (value.isEmpty()) { nameInput.setError("Enter an item."); return; }
+                                    playPreferences().edit().putString("tomorrow_item", value).apply();
+                                    item.setText(value);
+                                    saveSheet.dismiss();
+                                });
+                                showModal(saveSheet);
+                                return;
+                            }
                             playPreferences().edit().putString("tomorrow_item", name).apply();
                             Toast.makeText(requireContext(), "Saved for tomorrow", Toast.LENGTH_SHORT).show();
                         }));
                         actions.addView(plazaAction("Ask the Plaza", BG, TEAL, () -> {
                             Bundle args = new Bundle();
                             args.putString("wheel_item", item.getText().toString().trim());
-                            sheet.dismiss();
                             NavHostFragment.findNavController(this).navigate(R.id.publishFragment, args);
                         }));
                     }).start();
         });
-        showModal(sheet);
+        wheel.setOnClickListener(v -> spin.performClick());
+        result.setGravity(android.view.Gravity.CENTER);
+        result.setText("Buy it, skip it, or sleep on it?");
+        wheel.animate().setListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationCancel(android.animation.Animator animation) {
+                wheel.setEnabled(true);
+                spin.setEnabled(true);
+            }
+        });
+        wheel.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) {}
+            @Override public void onViewDetachedFromWindow(View view) { view.animate().cancel(); }
+        });
     }
 
     private android.content.SharedPreferences profilePreferences() {
@@ -1341,6 +1638,86 @@ public class SectionFragment extends Fragment {
             case "tote" -> "Sam";
             default -> "Jamie";
         };
+    }
+
+    private void weeklyRankings(LinearLayout parent) {
+        LinearLayout panel = card(parent);
+        heading(panel, "This week’s rankings");
+        RadioGroup categories = choices(panel, "", 0, "Judges", "Savers", "Spenders");
+        for (int i = 0; i < categories.getChildCount(); i++) categories.getChildAt(i).setMinimumHeight(dp(44));
+        TextView caption = text("", 12, MUTED);
+        panel.addView(caption);
+        LinearLayout list = column();
+        panel.addView(list);
+        TextView more = plazaAction("View all  →", Color.WHITE, TEAL, () -> {});
+        panel.addView(more);
+        Runnable load = () -> {
+            list.removeAllViews();
+            int index = picked(categories, 0) ? 0 : picked(categories, 1) ? 1 : 2;
+            String type = new String[]{"TOP_JUDGE", "HIGHEST_SAVED_AMOUNT", "HIGHEST_APPROVED_AMOUNT"}[index];
+            caption.setText(new String[]{"Unique buy checks voted on · this week",
+                    "Settled, rejected amounts · CNY only",
+                    "Approved amounts · converted to HKD"}[index]);
+            if (new com.hku.money.data.LiveApi(requireContext()).preview()) {
+                list.addView(text("Sign in to see community rankings.", 14, MUTED));
+                more.setVisibility(View.GONE);
+                return;
+            }
+            Object generation = new Object();
+            list.setTag(generation);
+            TextView loading = text("Loading…", 14, MUTED);
+            list.addView(loading);
+            new com.hku.money.data.LiveApi(requireContext()).request("GET",
+                    "rankings?type=" + type + "&period=WEEK&page=1&size=3", null, (data, error) -> {
+                if (getView() == null || list.getTag() != generation) return;
+                list.removeAllViews();
+                if (error != null) { list.addView(text(error, 13, MUTED)); return; }
+                com.google.gson.JsonObject page = data.getAsJsonObject();
+                com.google.gson.JsonArray entries = page.getAsJsonArray("items");
+                if (entries.isEmpty()) list.addView(text("A fresh week. No rankings yet.", 14, MUTED));
+                for (com.google.gson.JsonElement entry : entries) rankingRow(list, entry.getAsJsonObject(),
+                        index == 0 ? "votes" : index == 1 ? "CNY" : "HKD");
+            });
+            more.setOnClickListener(v -> weeklyRankingDetails(type,
+                    new String[]{"Top judges", "Top savers", "Top spenders"}[index], index == 0 ? "votes" : index == 1 ? "CNY" : "HKD"));
+        };
+        categories.setOnCheckedChangeListener((group, id) -> load.run());
+        load.run();
+    }
+
+    private void rankingRow(LinearLayout parent, com.google.gson.JsonObject entry, String unit) {
+        LinearLayout row = new LinearLayout(requireContext());
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(8), 0, dp(8));
+        parent.addView(row);
+        TextView number = text(jsonText(entry, "rankNo", "—"), 16, TEAL);
+        number.setTypeface(null, Typeface.BOLD);
+        row.addView(number, new LinearLayout.LayoutParams(dp(30), -2));
+        TextView name = text(jsonText(entry, "displayName", "Shopper"), 14, INK);
+        name.setMaxLines(1);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        row.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+        row.addView(text(jsonText(entry, "metricValue", "0") + " " + unit, 13, TEAL));
+    }
+
+    private void weeklyRankingDetails(String type, String title, String unit) {
+        BottomSheetDialog sheet = new BottomSheetDialog(requireContext());
+        LinearLayout panel = groupSheet(sheet, title);
+        panel.addView(text("This week · " + unit, 13, MUTED));
+        LinearLayout list = column();
+        panel.addView(list);
+        TextView status = text("Loading…", 14, MUTED);
+        list.addView(status);
+        new com.hku.money.data.LiveApi(requireContext()).request("GET",
+                "rankings?type=" + type + "&period=WEEK&page=1&size=100", null, (data, error) -> {
+            if (getView() == null || !sheet.isShowing()) return;
+            list.removeAllViews();
+            if (error != null) { list.addView(text(error, 14, MUTED)); return; }
+            com.google.gson.JsonArray entries = data.getAsJsonObject().getAsJsonArray("items");
+            if (entries.isEmpty()) list.addView(text("No rankings yet.", 14, MUTED));
+            for (com.google.gson.JsonElement entry : entries) rankingRow(list, entry.getAsJsonObject(), unit);
+        });
+        showModal(sheet);
     }
 
     private void profile() {
@@ -1368,7 +1745,17 @@ public class SectionFragment extends Fragment {
         displayName.setTypeface(null, Typeface.BOLD);
         content.addView(displayName);
         int points = playPreferences().getInt("points", 0);
-        content.addView(plazaAction(judgeRank(points) + "  ·  " + points + " pts", 0xffe9f3cf, TEAL, this::judgeBadge));
+        TextView badge = plazaAction(judgeRank(points) + "  ·  " + points + " pts", 0xffe9f3cf, TEAL, this::judgeBadge);
+        content.addView(badge);
+        if (!new com.hku.money.data.LiveApi(requireContext()).preview()) {
+            badge.setText("Judge Badge");
+            badge.setOnClickListener(v -> serverReputation());
+            new com.hku.money.data.LiveApi(requireContext()).request("GET", "users/me/reputation", null, (data, error) -> {
+                if (getView() == null || error != null) return;
+                com.google.gson.JsonObject score = data.getAsJsonObject();
+                badge.setText("Judge " + jsonText(score, "level", "1") + " · " + jsonText(score, "score", "0") + " pts");
+            });
+        }
 
         int votes = 0;
         for (Proposal proposal : SAMPLE_PROPOSALS) {
@@ -1401,7 +1788,7 @@ public class SectionFragment extends Fragment {
         profileTile(shortcuts, "☆", "Watching", "watching", 0xffe9f3cf);
         profileTile(shortcuts, "✎", "Drafts", "drafts", 0xffe7eef2);
 
-        content.addView(plazaAction("Wheel of Maybe  →", Color.WHITE, TEAL, this::decisionWheel));
+        weeklyRankings(content);
 
         LinearLayout privacy = card(content);
         heading(privacy, "Feed preferences");
@@ -1869,6 +2256,12 @@ public class SectionFragment extends Fragment {
                 if (labels.isEmpty()) labels.add("No groups available");
                 pickers[slot].setAdapter(new ArrayAdapter<>(requireContext(),
                         android.R.layout.simple_spinner_dropdown_item, labels));
+                if (slot == 0 && getArguments() != null) {
+                    String groupId = getArguments().getString("group_code");
+                    for (int i = 0; i < dictionaries[0].size(); i++) {
+                        if (jsonText(dictionaries[0].get(i).getAsJsonObject(), "id", "").equals(groupId)) pickers[0].setSelection(i);
+                    }
+                }
                 if (dictionaries[0] != null && dictionaries[1] != null && dictionaries[2] != null) {
                     networkStatus.setText("Choices loaded from server");
                 }
@@ -2223,6 +2616,7 @@ public class SectionFragment extends Fragment {
                 com.google.gson.JsonObject body = new com.google.gson.JsonObject();
                 body.add("channelIds", ids);
                 api.request("PUT", "channels/subscriptions", body, (saved, saveError) -> {
+                    if (getView() == null) return;
                     if (saveError != null) Toast.makeText(requireContext(), saveError, Toast.LENGTH_LONG).show();
                     else NavHostFragment.findNavController(this).navigateUp();
                 });
