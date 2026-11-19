@@ -66,7 +66,7 @@ public class LoginActivity extends AppCompatActivity {
         page.setFocusableInTouchMode(true);
         scroll.addView(page);
 
-        TextView monogram = label("b.", 30, TEAL, true);
+        TextView monogram = label("b·", 30, TEAL, true);
         monogram.setGravity(Gravity.CENTER);
         GradientDrawable badge = new GradientDrawable();
         badge.setColor(0xffd5ed7b);
@@ -78,7 +78,7 @@ public class LoginActivity extends AppCompatActivity {
         brand.setLetterSpacing(.18f);
         add(page, brand, 20);
         add(page, label("A little pause.\nA better buy.", 34, INK, true), 12);
-        add(page, label("Good decisions start here.", 15, MUTED, false), 10);
+        add(page, label("Your wallet’s little thinking buddy.", 15, MUTED, false), 10);
 
         TextView formTitle = label(registering ? "Create your account" : "Welcome back", 21, INK, true);
         add(page, formTitle, 32);

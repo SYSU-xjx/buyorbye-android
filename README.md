@@ -24,7 +24,13 @@ On the login screen, open **Server settings**, enter the API base URL or Swagger
 
 Register or log in to publish through the backend. The form loads available groups, channels, and tags from the server, saves a draft, then publishes it. After confirmation, **View post** opens Submitted records. Plaza and history use server pagination, refresh, and retry.
 
-**Explore Preview** saves posts on the device and labels them as local. Other areas, including rankings and parts of Profile, still use demo data. Photo upload is pending, and the current server publishing form supports MULTI + TIME settlement.
+Home now reads settled results and refreshes every 15 seconds. Groups show their proposals and include the tap-to-spin decision wheel. Profile shows weekly judge, savings and approved-amount rankings. Publishing supports photo upload and MULTI + TIME settlement.
+
+The savings ranking requires the companion backend branch [feature/weekly-savings-ranking](https://github.com/SYSU-xjx/buyorbye-backend/tree/feature/weekly-savings-ranking). Savings use settled rejected CNY amounts; approved spending uses HKD conversions.
+
+**Explore Preview** keeps demo records on the device.
+
+[Verification report — 39 API and 31 UI checks](docs/QA-2026-11-18.md). The report includes remaining coverage limits.
 
 <img src="docs/screenshots/login.png" alt="Login screen" width="240">
 
